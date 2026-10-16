@@ -32,6 +32,8 @@ class IdleView(context: Context, kind: String, onSettings: () -> Unit) : ScrollV
             setPadding(dp(16), dp(24), dp(16), dp(16))
         }
         addView(column, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        // The status bar may be hidden, the camera and gesture bar are not.
+        column.padToSafeArea()
 
         column.addView(spacer(), LinearLayout.LayoutParams(1, 0, 1f))
         column.addView(ImageView(context).apply { setImageResource(R.drawable.app_logo) },

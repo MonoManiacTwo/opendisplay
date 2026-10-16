@@ -104,6 +104,7 @@ class OnboardingSheet(context: Context, kind: String, onClose: () -> Unit) :
         val scroll = ScrollView(context)
         scroll.addView(column)
         root.addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        root.padToSafeArea()
         setContentView(root)
         window?.enterImmersive()
         window?.setLayout(MATCH, MATCH)

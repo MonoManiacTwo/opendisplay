@@ -69,7 +69,12 @@ class SettingsSheet(
             setBackgroundColor(palette.background)
         }
         root.addView(toolbar(), LinearLayout.LayoutParams(MATCH, dp(52)))
-        val scroll = ScrollView(context)
+        // Open at the top like the iOS sheet: the name field must not take
+        // initial focus and scroll the form (or raise the keyboard) by itself.
+        val scroll = ScrollView(context).apply {
+            isFocusableInTouchMode = true
+            descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+        }
         val form = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), 0, dp(16), dp(32))
@@ -77,11 +82,16 @@ class SettingsSheet(
         scroll.addView(form)
         root.addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
         buildForm(form)
+        root.padToSafeArea()
         setContentView(root)
         window?.enterImmersive()
         window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        setOnShowListener { ui.post(refresh) }
+        setOnShowListener {
+            scroll.requestFocus()
+            scroll.scrollTo(0, 0)
+            ui.post(refresh)
+        }
         setOnDismissListener {
             ui.removeCallbacks(refresh)
             commitName()

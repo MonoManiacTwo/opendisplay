@@ -56,6 +56,7 @@ class LogSheet(context: Context) : Dialog(context, SettingsSheet.themeFor(contex
             setPadding(dp(12), dp(8), dp(12), dp(24))
         })
         root.addView(scroll, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        root.padToSafeArea()
         setContentView(root)
         window?.enterImmersive()
         window?.setLayout(MATCH, MATCH)

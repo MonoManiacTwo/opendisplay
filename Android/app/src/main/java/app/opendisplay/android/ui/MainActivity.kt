@@ -1,6 +1,8 @@
 package app.opendisplay.android.ui
 
-import android.app.Activity
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.color.DynamicColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
@@ -43,7 +45,7 @@ import kotlin.math.roundToInt
  * The whole receiver UI: the stream fills the screen, the sender's cursor
  * floats above it, and an idle panel says how to connect when nothing streams.
  */
-class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks {
+class MainActivity : AppCompatActivity(), ReceiverServer.Listener, VideoDecoder.Callbacks, SettingsDialog.Host {
     private val main = Handler(Looper.getMainLooper())
 
     private lateinit var root: FrameLayout
@@ -55,8 +57,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private lateinit var statsText: TextView
     private lateinit var prefs: AppPrefs
     private lateinit var shake: ShakeDetector
-    private var settingsSheet: SettingsSheet? = null
-    private var onboardingSheet: OnboardingSheet? = null
+    private var onboarding: androidx.appcompat.app.AlertDialog? = null
 
     private lateinit var server: ReceiverServer
     private lateinit var advertiser: Advertiser
@@ -85,6 +86,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     @Volatile private var blockingMessage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
         Log.init(this)
         prefs = AppPrefs(this)
@@ -120,12 +122,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         updatePanel()
         main.post(statsTick)
         // First run: OpenDisplay is two apps; say so until the first connection.
-        if (!prefs.hasConnectedBefore && !prefs.onboardingDismissed) {
-            onboardingSheet = OnboardingSheet(this, uiKind()) {
-                prefs.onboardingDismissed = true
-                onboardingSheet = null
-            }.also { it.show() }
-        }
+        if (!prefs.hasConnectedBefore && !prefs.onboardingDismissed) showOnboarding()
     }
 
     override fun onResume() {
@@ -153,23 +150,48 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private fun uiKind() = DeviceIdentity.deviceKind(this).removePrefix("Android ")
 
     private fun showSettings() {
-        if (settingsSheet?.isShowing == true) return
-        settingsSheet = SettingsSheet(
-            context = this,
-            kind = uiKind(),
-            state = object : SettingsSheet.State {
-                override val connected: Boolean get() = this@MainActivity.connected
-                override val streamSummary: String? get() = streamInfo?.let { info ->
-                    if (hasPicture) "$info, %.0f fps".format(java.util.Locale.US, stats.lastSummary.fps) else info
-                }
-            },
-            onNameChanged = { name ->
-                DeviceIdentity.setServiceName(this, name)
-                advertiser.register(DeviceIdentity.serviceName(this), installId)
-            },
-            onOverlayChanged = { refreshIdle() },
-        ).also { it.show() }
+        if (supportFragmentManager.findFragmentByTag(SETTINGS) != null) return
+        SettingsDialog().show(supportFragmentManager, SETTINGS)
     }
+
+    /** The iOS OnboardingView's content as a stock Material dialog. */
+    private fun showOnboarding() {
+        val kind = uiKind()
+        val steps = listOf(R.string.onboarding_step1, R.string.onboarding_step2, R.string.hint_keep_open)
+            .mapIndexed { i, s -> "${i + 1}. ${getString(s)}" }.joinToString("\n")
+        onboarding = MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.onboarding_title)
+            .setMessage(getString(R.string.onboarding_body, kind) + "\n\n" + steps + "\n\n" +
+                getString(R.string.onboarding_footer, kind))
+            .setPositiveButton(R.string.get_mac_app) { _, _ ->
+                try {
+                    startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(SettingsDialog.MAC_APP_URL)))
+                } catch (_: Exception) {
+                }
+            }
+            .setNegativeButton(R.string.close, null)
+            .setOnDismissListener {
+                prefs.onboardingDismissed = true
+                onboarding = null
+            }
+            .show()
+    }
+
+    // SettingsDialog.Host
+    override val isConnected: Boolean get() = connected
+    override val streamSummary: String?
+        get() = streamInfo?.let { info ->
+            if (hasPicture) "$info, %.0f fps".format(java.util.Locale.US, stats.lastSummary.fps) else info
+        }
+    override val uiKind: String get() = uiKind()
+
+    override fun onNameChanged(name: String?) {
+        DeviceIdentity.setServiceName(this, name)
+        advertiser.register(DeviceIdentity.serviceName(this), installId)
+    }
+
+    override fun onOverlayChanged(enabled: Boolean) = refreshIdle()
 
     override fun onStart() {
         super.onStart()
@@ -450,7 +472,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
             hasPicture = false
             // The first valid connection retires the onboarding for good (iOS).
             prefs.hasConnectedBefore = true
-            onboardingSheet?.dismiss()
+            onboarding?.dismiss()
             blockingMessage = null
             // A previous sender's cursor must not ghost over the new one.
             cursorView.clear()
@@ -595,6 +617,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
 
     private companion object {
         const val TAG = "OpenDisplay"
+        const val SETTINGS = "settings"
         const val MATCH = FrameLayout.LayoutParams.MATCH_PARENT
         const val WRAP = FrameLayout.LayoutParams.WRAP_CONTENT
     }

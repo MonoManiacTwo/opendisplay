@@ -1,6 +1,6 @@
 package app.opendisplay.android.net
 
-import android.util.Log
+import app.opendisplay.android.Log
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket

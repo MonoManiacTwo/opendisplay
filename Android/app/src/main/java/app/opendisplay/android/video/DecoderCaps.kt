@@ -3,7 +3,7 @@ package app.opendisplay.android.video
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.os.Build
-import android.util.Log
+import app.opendisplay.android.Log
 import app.opendisplay.android.protocol.Codec
 import app.opendisplay.android.protocol.VideoCap
 

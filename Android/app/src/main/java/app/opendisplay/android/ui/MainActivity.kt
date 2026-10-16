@@ -9,7 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
+import app.opendisplay.android.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -51,10 +51,12 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private lateinit var surfaceView: SurfaceView
     private lateinit var cursorView: CursorView
     private lateinit var blank: View
-    private lateinit var idlePanel: LinearLayout
-    private lateinit var idleTitle: TextView
-    private lateinit var idleDetail: TextView
+    private lateinit var idleView: IdleView
     private lateinit var statsText: TextView
+    private lateinit var prefs: AppPrefs
+    private lateinit var shake: ShakeDetector
+    private var settingsSheet: SettingsSheet? = null
+    private var onboardingSheet: OnboardingSheet? = null
 
     private lateinit var server: ReceiverServer
     private lateinit var advertiser: Advertiser
@@ -81,11 +83,12 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private var connected = false
     private var hasPicture = false
     @Volatile private var blockingMessage: String? = null
-    private var overlayVisible = false
-    private var multiTouchToggle = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.init(this)
+        prefs = AppPrefs(this)
+        shake = ShakeDetector(this) { showSettings() }
         installId = DeviceIdentity.installId(this)
         wifiLock = createWifiLock()
         buildViews()
@@ -116,6 +119,56 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         )
         updatePanel()
         main.post(statsTick)
+        // First run: OpenDisplay is two apps; say so until the first connection.
+        if (!prefs.hasConnectedBefore && !prefs.onboardingDismissed) {
+            onboardingSheet = OnboardingSheet(this, uiKind()) {
+                prefs.onboardingDismissed = true
+                onboardingSheet = null
+            }.also { it.show() }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        shake.start()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        shake.stop()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Width and light/dark mode are baked into the idle view: rebuild it.
+        val index = root.indexOfChild(idleView)
+        val visibility = idleView.visibility
+        root.removeView(idleView)
+        idleView = IdleView(this, uiKind()) { showSettings() }.apply { this.visibility = visibility }
+        root.addView(idleView, index, FrameLayout.LayoutParams(MATCH, MATCH))
+        refreshIdle()
+    }
+
+    /** "phone" / "tablet" for UI text, like iOS's iPhone / iPad. */
+    private fun uiKind() = DeviceIdentity.deviceKind(this).removePrefix("Android ")
+
+    private fun showSettings() {
+        if (settingsSheet?.isShowing == true) return
+        settingsSheet = SettingsSheet(
+            context = this,
+            kind = uiKind(),
+            state = object : SettingsSheet.State {
+                override val connected: Boolean get() = this@MainActivity.connected
+                override val streamSummary: String? get() = streamInfo?.let { info ->
+                    if (hasPicture) "$info, %.0f fps".format(java.util.Locale.US, stats.lastSummary.fps) else info
+                }
+            },
+            onNameChanged = { name ->
+                DeviceIdentity.setServiceName(this, name)
+                advertiser.register(DeviceIdentity.serviceName(this), installId)
+            },
+            onOverlayChanged = { refreshIdle() },
+        ).also { it.show() }
     }
 
     override fun onStart() {
@@ -170,34 +223,8 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         }
         root.addView(blank, FrameLayout.LayoutParams(MATCH, MATCH))
 
-        val pad = dp(24)
-        idlePanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Color.BLACK)
-        }
-        idleTitle = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-        idleDetail = TextView(this).apply {
-            setTextColor(Color.rgb(170, 170, 170))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            gravity = Gravity.CENTER
-            setLineSpacing(0f, 1.25f)
-        }
-        val logo = android.widget.ImageView(this).apply { setImageResource(R.mipmap.ic_launcher) }
-        idlePanel.addView(logo, LinearLayout.LayoutParams(dp(72), dp(72)).apply { bottomMargin = dp(20) })
-        idlePanel.addView(idleTitle)
-        idlePanel.addView(idleDetail, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(12) })
-        root.addView(idlePanel, FrameLayout.LayoutParams(MATCH, MATCH))
-        idlePanel.setOnLongClickListener {
-            showRenameDialog()
-            true
-        }
+        idleView = IdleView(this, uiKind()) { showSettings() }
+        root.addView(idleView, FrameLayout.LayoutParams(MATCH, MATCH))
 
         statsText = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -207,9 +234,10 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
             setPadding(dp(8), dp(6), dp(8), dp(6))
             visibility = View.GONE
         }
+        // Bottom of the screen, as on iOS.
         root.addView(statsText, FrameLayout.LayoutParams(WRAP, WRAP).apply {
-            gravity = Gravity.TOP or Gravity.START
-            topMargin = dp(32)
+            gravity = Gravity.BOTTOM or Gravity.START
+            bottomMargin = dp(24)
             leftMargin = dp(12)
         })
 
@@ -220,58 +248,13 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         root.setOnGenericMotionListener { _, event -> onHover(event) }
     }
 
-    /** The Bonjour name is what the Mac lists; let people make it recognizable. */
-    private fun showRenameDialog() {
-        val input = android.widget.EditText(this).apply {
-            setText(DeviceIdentity.serviceName(this@MainActivity))
-            setSingleLine()
-            selectAll()
-        }
-        val frame = FrameLayout(this).apply {
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(input)
-        }
-        android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.rename_title)
-            .setMessage(R.string.rename_message)
-            .setView(frame)
-            .setPositiveButton(R.string.rename_save) { _, _ ->
-                DeviceIdentity.setServiceName(this, input.text.toString())
-                advertiser.register(DeviceIdentity.serviceName(this), installId)
-                refreshIdle()
-            }
-            .setNeutralButton(R.string.rename_reset) { _, _ ->
-                DeviceIdentity.setServiceName(this, null)
-                advertiser.register(DeviceIdentity.serviceName(this), installId)
-                refreshIdle()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    @Suppress("DEPRECATION")
-    private fun enterImmersive() {
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let {
-                it.hide(WindowInsets.Type.systemBars())
-                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
-            window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
-        }
-    }
+    private fun enterImmersive() = window.enterImmersive()
 
     /** Main thread: reflect connection/picture/sleep state in the views. */
     private fun refreshIdle() {
         val streaming = connected && hasPicture && !senderAsleep && blockingMessage == null
-        idlePanel.visibility = if (streaming || (connected && senderAsleep)) View.GONE else View.VISIBLE
+        idleView.visibility = if (streaming || (connected && senderAsleep)) View.GONE else View.VISIBLE
+        statsText.visibility = if (streaming && prefs.showAnalytics) View.VISIBLE else View.GONE
         blank.visibility = if (connected && senderAsleep) View.VISIBLE else View.GONE
         cursorView.visibility = if (streaming) View.VISIBLE else View.INVISIBLE
         // Input is gated on streaming: a gesture cut off here must still
@@ -286,24 +269,11 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         if (wantLock && !wifiLock.isHeld) wifiLock.acquire()
         if (!wantLock && wifiLock.isHeld) wifiLock.release()
 
-        val name = advertiser.registeredName ?: DeviceIdentity.serviceName(this)
         val message = blockingMessage
         when {
-            message != null -> {
-                idleTitle.text = getString(R.string.update_needed)
-                idleDetail.text = message
-            }
-            connected -> {
-                idleTitle.text = getString(R.string.connecting)
-                idleDetail.text = getString(R.string.waiting_for_picture, transport)
-            }
-            else -> {
-                idleTitle.text = getString(R.string.ready_title)
-                val addrs = DeviceIdentity.ipv4Addresses().joinToString("  ")
-                idleDetail.text = getString(R.string.ready_detail, name) +
-                    (if (addrs.isNotEmpty()) "\n\n" + getString(R.string.addresses, addrs) else "") +
-                    "\n\n" + getString(R.string.rename_hint)
-            }
+            message != null -> idleView.setStatus(message, connected = false)
+            connected -> idleView.setStatus(getString(R.string.status_waiting_picture), connected = true)
+            else -> idleView.setStatus(getString(R.string.status_ready), connected = false)
         }
     }
 
@@ -412,18 +382,6 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private fun onTouch(event: MotionEvent): Boolean {
         if (!connected || !hasPicture || senderAsleep || blockingMessage != null) return true
         val action = event.actionMasked
-        // Three fingers toggle the perf overlay and never reach the sender.
-        if (action == MotionEvent.ACTION_POINTER_DOWN && event.pointerCount == 3) {
-            gestures.cancel()
-            multiTouchToggle = true
-            overlayVisible = !overlayVisible
-            statsText.visibility = if (overlayVisible) View.VISIBLE else View.GONE
-            return true
-        }
-        if (multiTouchToggle) {
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) multiTouchToggle = false
-            return true
-        }
         // The pen owns the gesture it starts; fingers wait while it is down
         // (palm rejection, as on iOS).
         if (isStylus(event) || pen.penDown) {
@@ -490,6 +448,9 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         main.post {
             connected = true
             hasPicture = false
+            // The first valid connection retires the onboarding for good (iOS).
+            prefs.hasConnectedBefore = true
+            onboardingSheet?.dismiss()
             blockingMessage = null
             // A previous sender's cursor must not ghost over the new one.
             cursorView.clear()
@@ -602,9 +563,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
 
     override fun onDecoderError(message: String) {
         Log.w(TAG, message)
-        main.post {
-            idleDetail.text = message
-        }
+        main.post { idleView.setStatus(message, connected) }
     }
 
     // endregion
@@ -612,13 +571,13 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private val statsTick = object : Runnable {
         override fun run() {
             val s = stats.roll()
-            if (overlayVisible) {
+            if (statsText.visibility == View.VISIBLE) {
                 val health = senderHealth
                 statsText.text = buildString {
                     append(streamInfo ?: "stream ?").append("  ").append(transport).append('\n')
-                    append("fps %.0f  %.1f Mb/s\n".format(s.fps, s.mbps))
-                    append("e2e p50 %s  p95 %s ms\n".format(fmt(s.e2e50), fmt(s.e2e95)))
-                    append("decode p50 %s ms  rtt %s ms\n".format(fmt(s.dec50), fmt(server.clock.lastRttMs)))
+                    append("fps %.0f  %.1f Mb/s\n".format(java.util.Locale.US, s.fps, s.mbps))
+                    append("e2e p50 %s  p95 %s ms\n".format(java.util.Locale.US, fmt(s.e2e50), fmt(s.e2e95)))
+                    append("decode p50 %s ms  rtt %s ms\n".format(java.util.Locale.US, fmt(s.dec50), fmt(server.clock.lastRttMs)))
                     append("decoder ${decoder.codecName ?: "-"}  drops ${decoder.droppedFrames}")
                     health?.let {
                         append("\nsender cap ${it.optInt("capFps")} fps  enc drops ${it.optInt("encDrops")}" +
@@ -630,7 +589,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         }
     }
 
-    private fun fmt(v: Double?) = v?.let { "%.0f".format(it) } ?: "-"
+    private fun fmt(v: Double?) = v?.let { "%.0f".format(java.util.Locale.US, it) } ?: "-"
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).roundToInt()
 

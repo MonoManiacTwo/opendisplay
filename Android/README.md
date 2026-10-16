@@ -27,10 +27,12 @@ immersive insets) are used when present.
   `stats` every 5 s (shows up as `PHONE-STATS` in the Mac log).
 - Locking the phone or leaving the app sends `sleeping`; quitting sends
   `closing`. A sender that goes to sleep blanks the screen.
-- Three-finger tap toggles a performance overlay (fps, end-to-end latency,
-  decode time, RTT, decoder name).
 
-- Long-press the idle screen to rename the device as the Mac lists it.
+- Settings and help work like the iOS app: the idle screen's "Settings &
+  Help" button, or shake the device anytime (the stream keeps running).
+  Status, the name the Mac lists, the performance overlay, a shareable
+  connection log, how to connect, and links. First launch shows the same
+  "One more app to go" onboarding until the first connection.
 
 - Stylus (S Pen, USI and other active pens): `pencil` down/move/up with
   pressure, tilt and azimuth, `hover` and `proximity` while in range, and

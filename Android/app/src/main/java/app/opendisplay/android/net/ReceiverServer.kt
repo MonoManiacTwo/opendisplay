@@ -2,7 +2,7 @@ package app.opendisplay.android.net
 
 import android.os.SystemClock
 import android.util.Base64
-import android.util.Log
+import app.opendisplay.android.Log
 import app.opendisplay.android.protocol.ClockSync
 import app.opendisplay.android.protocol.Codec
 import app.opendisplay.android.protocol.CursorSequence

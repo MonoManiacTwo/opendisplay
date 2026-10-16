@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ready_title">Ready to connect</string>
+    <string name="ready_detail">Open OpenDisplay on your Mac and pick \"%1$s\".\nBoth need to be on the same Wi-Fi.</string>
+    <string name="addresses">This device: %1$s</string>
+    <string name="connecting">Connected</string>
+    <string name="waiting_for_picture">Waiting for the picture (%1$s)…</string>
+    <string name="update_needed">Update needed</string>
+    <string name="update_sender">OpenDisplay on the connecting Mac is too old for this app. Update it there to reconnect.</string>
+</resources>

@@ -3,7 +3,7 @@ package app.opendisplay.android.net
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.util.Log
+import app.opendisplay.android.Log
 import app.opendisplay.android.protocol.WireProtocol
 
 /**
@@ -13,12 +13,20 @@ import app.opendisplay.android.protocol.WireProtocol
 class Advertiser(context: Context) {
     private val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     private var registration: NsdManager.RegistrationListener? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var retries = 0
 
     var registeredName: String? = null
         private set
 
     fun register(name: String, installId: String, port: Int = WireProtocol.TCP_PORT) {
-        unregister()
+        main.removeCallbacksAndMessages(null)
+        retries = 0
+        registerOnce(name, installId, port)
+    }
+
+    private fun registerOnce(name: String, installId: String, port: Int) {
+        unregisterQuietly()
         val info = NsdServiceInfo().apply {
             serviceName = name
             serviceType = WireProtocol.SERVICE_TYPE
@@ -28,9 +36,18 @@ class Advertiser(context: Context) {
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {
-                // NSD may rename on a collision ("Pixel (2)").
                 registeredName = info.serviceName
                 Log.i(TAG, "advertising '${info.serviceName}' as ${WireProtocol.SERVICE_TYPE}")
+                // NSD renames on a collision ("Pixel 10a (2)"). Usually the
+                // collision is our own previous process, whose record lingers
+                // after a kill. The Mac remembers devices by name, so a renamed
+                // service would not auto-reconnect: claim the real name back.
+                if (info.serviceName != name && retries < MAX_RETRIES && registration === this) {
+                    retries++
+                    main.postDelayed({
+                        if (registration === this) registerOnce(name, installId, port)
+                    }, RETRY_DELAY_MS)
+                }
             }
 
             override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
@@ -45,6 +62,11 @@ class Advertiser(context: Context) {
     }
 
     fun unregister() {
+        main.removeCallbacksAndMessages(null)
+        unregisterQuietly()
+    }
+
+    private fun unregisterQuietly() {
         val listener = registration ?: return
         registration = null
         registeredName = null
@@ -57,5 +79,7 @@ class Advertiser(context: Context) {
 
     private companion object {
         const val TAG = "OpenDisplay"
+        const val MAX_RETRIES = 6
+        const val RETRY_DELAY_MS = 5000L
     }
 }

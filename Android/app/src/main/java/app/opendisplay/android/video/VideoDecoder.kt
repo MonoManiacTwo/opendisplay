@@ -5,7 +5,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
+import app.opendisplay.android.Log
 import android.view.Surface
 import app.opendisplay.android.protocol.AccessUnit
 import app.opendisplay.android.protocol.AnnexB
@@ -71,6 +71,10 @@ class VideoDecoder(private val callbacks: Callbacks) {
     @Volatile var droppedFrames = 0
         private set
 
+    /**
+     * True once the current decoder has put out a picture. Until then the
+     * frames queued while it was created are expected, not a backlog.
+     */
     @Volatile private var decoderLive = false
 
     /** Raised when a frame overflowed the decoder's input buffers (some OMX caps). */
@@ -307,7 +311,6 @@ class VideoDecoder(private val callbacks: Callbacks) {
             created.configure(format, surface, null, 0)
             created.start()
             decoder = created
-            decoderLive = true
             codecName = created.name
             output = OutputDrain(created).also { it.start() }
             Log.i(TAG, "decoder ${created.name} configured: ${codec.wire} ${width}x$height")
@@ -413,6 +416,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
                             failed(e)
                             return
                         }
+                        decoderLive = true
                         val meta = inFlight.remove(info.presentationTimeUs)
                         if (meta != null) callbacks.onFrameRendered(meta.first, meta.second)
                     }

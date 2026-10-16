@@ -70,6 +70,8 @@ class VideoDecoder(private val callbacks: Callbacks) {
     @Volatile var droppedFrames = 0
         private set
 
+    @Volatile private var decoderLive = false
+
     fun start() = thread.start()
 
     fun setSurface(surface: Surface?) = queue.put(Work.SetSurface(surface))
@@ -86,7 +88,10 @@ class VideoDecoder(private val callbacks: Callbacks) {
     fun submit(unit: AccessUnit) {
         // Falling behind adds latency to every later frame. Drop the backlog
         // and recover from a keyframe instead of decoding stale pictures.
-        if (queue.size > MAX_BACKLOG) {
+        // Only once a decoder runs: while one is being created the queue
+        // fills by design and drains in a burst right after.
+        val limit = if (decoderLive) MAX_BACKLOG else MAX_STARTUP_BACKLOG
+        if (queue.size > limit) {
             val kept = queue.filter { it !is Work.Frame }
             droppedFrames += queue.size - kept.size
             queue.clear()
@@ -284,6 +289,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
             created.configure(format, surface, null, 0)
             created.start()
             decoder = created
+            decoderLive = true
             codecName = created.name
             output = OutputDrain(created).also { it.start() }
             Log.i(TAG, "decoder ${created.name} configured: ${codec.wire} ${width}x$height")
@@ -347,6 +353,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
             it.release()
         }
         decoder = null
+        decoderLive = false
         codecName = null
     }
 
@@ -416,6 +423,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
     private companion object {
         const val TAG = "OpenDisplay"
         const val MAX_BACKLOG = 6
+        const val MAX_STARTUP_BACKLOG = 90
         const val INPUT_TIMEOUT_US = 20_000L
         val OUTPUT_TIMEOUT_US = TimeUnit.MILLISECONDS.toMicros(10)
         const val KEYFRAME_REQUEST_INTERVAL_MS = 300L

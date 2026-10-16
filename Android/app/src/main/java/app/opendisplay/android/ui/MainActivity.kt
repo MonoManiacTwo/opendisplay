@@ -62,6 +62,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private val stats = StreamStats()
 
     private lateinit var installId: String
+    private lateinit var wifiLock: android.net.wifi.WifiManager.WifiLock
 
     // Read by network threads to build `hello`.
     @Volatile private var panel = Panel(0, 0, 1.0)
@@ -83,6 +84,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         installId = DeviceIdentity.installId(this)
+        wifiLock = createWifiLock()
         buildViews()
         setContentView(root)
         enterImmersive()
@@ -124,6 +126,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
 
     override fun onDestroy() {
         super.onDestroy()
+        if (wifiLock.isHeld) wifiLock.release()
         main.removeCallbacksAndMessages(null)
         decoder.release()
     }
@@ -230,6 +233,11 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         val keepOn = connected && !senderAsleep
         if (keepOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Wi-Fi power save parks the radio between beacons: on a Pixel the
+        // RTT swung 60-240 ms. Hold the radio awake while a Wi-Fi session runs.
+        val wantLock = keepOn && transport == "WiFi"
+        if (wantLock && !wifiLock.isHeld) wifiLock.acquire()
+        if (!wantLock && wifiLock.isHeld) wifiLock.release()
 
         val name = advertiser.registeredName ?: DeviceIdentity.serviceName(this)
         val message = blockingMessage
@@ -252,6 +260,14 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     }
 
     // endregion
+
+    @Suppress("DEPRECATION")
+    private fun createWifiLock(): android.net.wifi.WifiManager.WifiLock {
+        val wifi = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
+        val mode = if (Build.VERSION.SDK_INT >= 29) android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        else android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        return wifi.createWifiLock(mode, "OpenDisplay:stream").apply { setReferenceCounted(false) }
+    }
 
     // region Panel and hello
 

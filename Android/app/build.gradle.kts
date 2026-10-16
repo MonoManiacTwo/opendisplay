@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "app.opendisplay.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.opendisplay.android"
         minSdk = 21
-        targetSdk = 35
+        targetSdk = 36
         // CI passes the shared repo version (release-please) as Gradle
         // properties; local builds fall back to these defaults.
         versionCode = (findProperty("appVersionCode") as String?)?.toInt() ?: 1

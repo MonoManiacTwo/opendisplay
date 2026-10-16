@@ -83,11 +83,13 @@ class MainActivity : AppCompatActivity(), ReceiverServer.Listener, VideoDecoder.
     // Main-thread state.
     private var connected = false
     private var hasPicture = false
+    private var nightMode = 0
     @Volatile private var blockingMessage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
+        nightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
         Log.init(this)
         prefs = AppPrefs(this)
         shake = ShakeDetector(this) { showSettings() }
@@ -137,6 +139,20 @@ class MainActivity : AppCompatActivity(), ReceiverServer.Listener, VideoDecoder.
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        // The activity handles uiMode itself so a stream survives a light or
+        // dark switch, but its theme keeps the variant it was created with.
+        // Rebuild the theme from the new resources, then the views on it.
+        val night = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        if (night != nightMode) {
+            nightMode = night
+            theme.setTo(resources.newTheme().apply { applyStyle(R.style.Theme_OpenDisplay, true) })
+            DynamicColors.applyToActivityIfAvailable(this)
+            onboarding?.takeIf { it.isShowing }?.let { it.setOnDismissListener(null); it.dismiss(); showOnboarding() }
+            (supportFragmentManager.findFragmentByTag(SETTINGS) as? SettingsDialog)?.let {
+                it.dismissAllowingStateLoss()
+                main.post { showSettings() }
+            }
+        }
         // Width and light/dark mode are baked into the idle view: rebuild it.
         val index = root.indexOfChild(idleView)
         val visibility = idleView.visibility

@@ -74,7 +74,7 @@ over USB (dial a tunneled port), and one code path serves both transports.
 The core protocol is transport-agnostic beyond "a TCP byte stream to port
 9000 on the receiver". How the sender finds that port is a *binding*. Two
 bindings exist today; ports to other platforms MAY define their own (for
-example an Android receiver reachable over `adb reverse`) without touching
+example an Android receiver reachable over `adb forward`) without touching
 anything else in this document.
 
 ### 2.1 WiFi / LAN (Bonjour)
@@ -840,7 +840,9 @@ recorded as hints for porters:
   `MediaCodec` + `SurfaceView`.
 * **USB from non-Mac senders:** libimobiledevice's usbmuxd implementation;
   `iproxy` demonstrates the tunnel. For non-Apple *receivers*, defining an
-  analogous binding (e.g. `adb reverse tcp:9000 tcp:9000`) is enough.
+  analogous binding (e.g. `adb forward tcp:9100 tcp:9000`, the sender dialing
+  `127.0.0.1:9100`) is enough. It must be `forward`, not `reverse`: the
+  sender dials the receiver.
 * The sender logs receiver `stats` lines prefixed `PHONE-STATS`, so one
   log file tells the whole story when debugging a session.
 

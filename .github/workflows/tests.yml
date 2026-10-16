@@ -66,3 +66,21 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
+
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Android
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Lint is what catches a platform API above minSdk 21 sneaking in
+      # without an SDK_INT guard.
+      - name: Unit tests, lint, debug build
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug

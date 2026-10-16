@@ -29,6 +29,7 @@ import app.opendisplay.android.protocol.AnnexB
 import app.opendisplay.android.protocol.Codec
 import app.opendisplay.android.protocol.Messages
 import app.opendisplay.android.protocol.Panel
+import app.opendisplay.android.protocol.PenInput
 import app.opendisplay.android.protocol.TouchGestures
 import app.opendisplay.android.protocol.VideoCap
 import app.opendisplay.android.protocol.WireProtocol
@@ -59,6 +60,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     private lateinit var advertiser: Advertiser
     private lateinit var decoder: VideoDecoder
     private lateinit var gestures: TouchGestures
+    private lateinit var pen: PenInput
     private val stats = StreamStats()
 
     private lateinit var installId: String
@@ -99,12 +101,18 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
                 override fun touch(phase: String, x: Double, y: Double) = server.sendTouch(phase, x, y)
                 override fun scroll(dx: Double, dy: Double) = server.sendScroll(dx, dy)
             },
-            scheduler = { delay, action ->
-                val r = Runnable(action)
-                main.postDelayed(r, delay)
-                TouchGestures.Cancellable { main.removeCallbacks(r) }
-            },
+            scheduler = gestureScheduler,
             dragSlopPx = slop,
+        )
+        pen = PenInput(
+            output = object : PenInput.Output {
+                override fun pencil(phase: String, s: PenInput.Sample) = server.sendPencil(phase, s)
+                override fun proximity(entering: Boolean, x: Double, y: Double) =
+                    server.sendProximity(entering, x, y)
+                override fun touch(phase: String, x: Double, y: Double) = server.sendTouch(phase, x, y)
+            },
+            scheduler = gestureScheduler,
+            senderPv = { server.senderPv },
         )
         updatePanel()
         main.post(statsTick)
@@ -209,6 +217,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
             if (r - l != or - ol || b - t != ob - ot) updatePanel()
         }
         root.setOnTouchListener { _, event -> onTouch(event) }
+        root.setOnGenericMotionListener { _, event -> onHover(event) }
     }
 
     /** The Bonjour name is what the Mac lists; let people make it recognizable. */
@@ -356,6 +365,50 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
 
     // region Input
 
+    private val gestureScheduler = TouchGestures.Scheduler { delay, action ->
+        val r = Runnable(action)
+        main.postDelayed(r, delay)
+        TouchGestures.Cancellable { main.removeCallbacks(r) }
+    }
+
+    private fun isStylus(event: MotionEvent, index: Int = 0): Boolean {
+        val tool = event.getToolType(index)
+        return tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
+    }
+
+    private fun penSample(event: MotionEvent, history: Int = -1): PenInput.Sample {
+        fun axis(a: Int) = if (history < 0) event.getAxisValue(a, 0) else event.getHistoricalAxisValue(a, 0, history)
+        val p = point(axis(MotionEvent.AXIS_X), axis(MotionEvent.AXIS_Y))
+        return PenInput.Sample.fromAxes(p.nx, p.ny, axis(MotionEvent.AXIS_PRESSURE),
+            axis(MotionEvent.AXIS_ORIENTATION), axis(MotionEvent.AXIS_TILT))
+    }
+
+    private fun onPen(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gestures.cancel() // a resting finger must not keep a press open
+                pen.down(penSample(event))
+            }
+            MotionEvent.ACTION_MOVE -> {
+                for (h in 0 until event.historySize) pen.move(penSample(event, h))
+                pen.move(penSample(event))
+            }
+            MotionEvent.ACTION_UP -> pen.up(penSample(event))
+            MotionEvent.ACTION_CANCEL -> pen.up(penSample(event), cancelled = true)
+        }
+        return true
+    }
+
+    /** Stylus hover arrives as generic motion, not touch. */
+    private fun onHover(event: MotionEvent): Boolean {
+        if (!connected || !hasPicture || senderAsleep || !isStylus(event)) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> pen.hover(penSample(event))
+            MotionEvent.ACTION_HOVER_EXIT -> penSample(event).let { pen.hoverExit(it.x, it.y) }
+        }
+        return true
+    }
+
     private fun onTouch(event: MotionEvent): Boolean {
         if (!connected || !hasPicture || senderAsleep || blockingMessage != null) return true
         val action = event.actionMasked
@@ -370,6 +423,11 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         if (multiTouchToggle) {
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) multiTouchToggle = false
             return true
+        }
+        // The pen owns the gesture it starts; fingers wait while it is down
+        // (palm rejection, as on iOS).
+        if (isStylus(event) || pen.penDown) {
+            return if (isStylus(event)) onPen(event) else true
         }
         val primary = point(event.getX(0), event.getY(0))
         when (action) {

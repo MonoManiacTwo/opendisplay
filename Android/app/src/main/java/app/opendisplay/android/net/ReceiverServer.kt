@@ -9,6 +9,7 @@ import app.opendisplay.android.protocol.CursorSequence
 import app.opendisplay.android.protocol.Demux
 import app.opendisplay.android.protocol.Framing
 import app.opendisplay.android.protocol.Messages
+import app.opendisplay.android.protocol.PenInput
 import app.opendisplay.android.protocol.WireProtocol
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -233,6 +234,12 @@ class ReceiverServer(
     }
 
     fun sendScroll(dx: Double, dy: Double) = send(Messages.scroll(dx, dy))
+
+    fun sendPencil(phase: String, s: PenInput.Sample) = send(Messages.pencil(phase,
+        s.copy(x = s.x.coerceIn(0.0, 1.0), y = s.y.coerceIn(0.0, 1.0)), senderNow()))
+
+    fun sendProximity(entering: Boolean, x: Double, y: Double) =
+        send(Messages.proximity(entering, x.coerceIn(0.0, 1.0), y.coerceIn(0.0, 1.0)))
 
     fun requestKeyframe() = send(Messages.simple("kf"))
 

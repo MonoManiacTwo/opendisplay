@@ -32,7 +32,12 @@ immersive insets) are used when present.
 
 - Long-press the idle screen to rename the device as the Mac lists it.
 
-Not yet: stylus input as `pencil`, sender-side ADB discovery.
+- Stylus (S Pen, USI and other active pens): `pencil` down/move/up with
+  pressure, tilt and azimuth, `hover` and `proximity` while in range, and
+  fingers ignored while the pen is down. Senders below pv 3 get the pen as
+  `touch`. Covered by unit tests; not yet tried with real pen hardware.
+
+Not yet: sender-side ADB discovery.
 
 ## Build and install
 

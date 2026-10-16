@@ -81,6 +81,22 @@ object Messages {
             t?.let { put("t", it) }
         }
 
+    /** pv 3 stylus (6.1). Barrel roll is not measured: `rotation` is always 0. */
+    fun pencil(phase: String, s: PenInput.Sample, t: Double?): JSONObject = JSONObject().apply {
+        put("type", "pencil")
+        put("phase", phase)
+        put("x", s.x)
+        put("y", s.y)
+        put("pressure", s.pressure)
+        put("azimuth", s.azimuth)
+        put("altitude", s.altitude)
+        put("rotation", 0)
+        t?.let { put("t", it) }
+    }
+
+    fun proximity(entering: Boolean, x: Double, y: Double): JSONObject =
+        JSONObject().put("type", "proximity").put("entering", entering).put("x", x).put("y", y)
+
     fun scroll(dx: Double, dy: Double): JSONObject =
         JSONObject().put("type", "scroll").put("dx", dx).put("dy", dy)
 

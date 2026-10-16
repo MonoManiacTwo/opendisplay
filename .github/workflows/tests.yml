@@ -81,6 +81,8 @@ jobs:
           java-version: 17
 
       # Lint is what catches a platform API above minSdk 21 sneaking in
-      # without an SDK_INT guard.
-      - name: Unit tests, lint, debug build
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      # without an SDK_INT guard. assembleRelease (unsigned) runs the release
+      # variant's lintVital and resource checks, which otherwise first run in
+      # the release workflow after the tag already exists.
+      - name: Unit tests, lint, debug and release builds
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease

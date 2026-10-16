@@ -18,6 +18,7 @@ release workflow handles these artifacts:
 | iPhone and iPad receiver | `OpenSidecariOS` | One universal build uploaded to TestFlight |
 | Linux sender (beta) | `linux/crates/od-sender` | `od-sender-{x86_64,aarch64}-unknown-linux-gnu.tar.gz` (static FFmpeg) on the same GitHub release |
 | Linux receiver (beta) | `linux/crates/od-receiver` | `od-receiver-{x86_64,aarch64}.flatpak` on the same GitHub release |
+| Android receiver | `Android/` (Gradle) | Signed `OpenDisplay-Android.apk` plus its `.sha256` on GitHub Releases |
 
 Both macOS apps are rebuilt and published on every release. The iPhone/iPad
 build is uploaded to TestFlight on every release, but publishing it to the App
@@ -72,6 +73,16 @@ own for the version number. To keep it in step:
   protocol and feature set on every platform.
 - Note the Android build in the release notes of the matching GitHub release.
 
+The Android APK is rebuilt and attached on every release, with `versionName`
+set to the tag and `versionCode` derived from it as major*1000000 +
+minor*10000 + patch*100 + rebuild (1.26.0 becomes 1260000). CI uses rebuild
+0; a manual Play re-upload of the same version takes the next free rebuild
+number, because Play never frees a versionCode. It is
+signed in CI with the `ANDROID_*` keystore secrets; without them the job builds
+but attaches nothing. Nothing updates Android installs: users replace the APK
+by hand, so a release does not reach them the way Sparkle or the App Store
+does.
+
 ## Release impact record
 
 Copy this section into the release PR and fill it in before creating the tag.
@@ -85,6 +96,7 @@ users need that release to receive the fix or remain compatible.
 | macOS receiver | | | | |
 | iPhone receiver | | | | |
 | iPad receiver | | | | |
+| Android receiver | | | | |
 
 - App Store production release: [ ] required [ ] recommended [ ] not required
 - Reason for the App Store decision:
@@ -104,6 +116,8 @@ users need that release to receive the fix or remain compatible.
   - [ ] released sender with new iPhone/iPad receiver
   - [ ] new sender with released macOS receiver
   - [ ] released sender with new macOS receiver
+  - [ ] new sender with released Android receiver
+  - [ ] released sender with new Android receiver
   - [ ] new sender with new receiver
 - [ ] State whether a forced update is required. If yes, explain why graceful
       fallback is impossible and which versions are rejected.
@@ -138,6 +152,11 @@ supported peer only when continuing would be incorrect or unsafe.
 - [ ] Build the macOS receiver at its macOS 12 deployment floor.
 - [ ] Build the generic iOS/iPadOS target. This is required when `Shared/`,
       `iOS/`, protocol code, assets, or project settings changed.
+- [ ] Run the Android checks when `Android/` or the wire protocol changed:
+
+  ```sh
+  cd Android && ./gradlew testDebugUnitTest lintDebug assembleRelease
+  ```
 - [ ] For a release candidate, build both macOS apps in Release configuration
       and verify their executables contain `arm64` and `x86_64` with
       `lipo -info` or `file`.
@@ -164,6 +183,8 @@ resolution, refresh rate, transport, and app versions used.
       behavior.
 - [ ] The oldest supported macOS receiver launches on Intel hardware when
       receiver or shared code changed.
+- [ ] The Android receiver connects over WiFi on a current device and on an
+      Android 5.x device or emulator when `Android/` or the protocol changed.
 - [ ] Existing App Store iPhone/iPad builds remain usable when no production
       mobile release is planned.
 
@@ -184,6 +205,10 @@ A clean average does not excuse severe tail latency or recovery failures.
       `od-sender --version` from a tarball prints the release version.
 - [ ] Both DMGs and contained apps pass signature, notarization, and Gatekeeper
       checks.
+- [ ] The release contains `OpenDisplay-Android.apk` and its `.sha256`,
+      `apksigner verify --print-certs` shows the release certificate (the same
+      one as every earlier release), and the APK installs over the previous
+      release without uninstalling.
 - [ ] The sender and receiver Sparkle appcasts point to the correct DMGs and a
       released installation can update through each feed.
 - [ ] The TestFlight upload finishes processing and launches on both an iPhone

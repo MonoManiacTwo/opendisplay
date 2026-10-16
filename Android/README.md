@@ -30,8 +30,9 @@ immersive insets) are used when present.
 - Three-finger tap toggles a performance overlay (fps, end-to-end latency,
   decode time, RTT, decoder name).
 
-Not yet: stylus input as `pencil`, renaming the device in the app, sender
-side ADB discovery.
+- Long-press the idle screen to rename the device as the Mac lists it.
+
+Not yet: stylus input as `pencil`, sender-side ADB discovery.
 
 ## Build and install
 

@@ -7,4 +7,9 @@
     <string name="waiting_for_picture">Waiting for the picture (%1$s)…</string>
     <string name="update_needed">Update needed</string>
     <string name="update_sender">OpenDisplay on the connecting Mac is too old for this app. Update it there to reconnect.</string>
+    <string name="rename_hint">Long-press to rename this display.</string>
+    <string name="rename_title">Display name</string>
+    <string name="rename_message">The name your Mac shows for this device.</string>
+    <string name="rename_save">Save</string>
+    <string name="rename_reset">Use device name</string>
 </resources>

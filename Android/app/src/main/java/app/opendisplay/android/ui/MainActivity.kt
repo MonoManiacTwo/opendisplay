@@ -186,6 +186,10 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         idlePanel.addView(idleTitle)
         idlePanel.addView(idleDetail, LinearLayout.LayoutParams(WRAP, WRAP).apply { topMargin = dp(12) })
         root.addView(idlePanel, FrameLayout.LayoutParams(MATCH, MATCH))
+        idlePanel.setOnLongClickListener {
+            showRenameDialog()
+            true
+        }
 
         statsText = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -205,6 +209,35 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
             if (r - l != or - ol || b - t != ob - ot) updatePanel()
         }
         root.setOnTouchListener { _, event -> onTouch(event) }
+    }
+
+    /** The Bonjour name is what the Mac lists; let people make it recognizable. */
+    private fun showRenameDialog() {
+        val input = android.widget.EditText(this).apply {
+            setText(DeviceIdentity.serviceName(this@MainActivity))
+            setSingleLine()
+            selectAll()
+        }
+        val frame = FrameLayout(this).apply {
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(input)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.rename_title)
+            .setMessage(R.string.rename_message)
+            .setView(frame)
+            .setPositiveButton(R.string.rename_save) { _, _ ->
+                DeviceIdentity.setServiceName(this, input.text.toString())
+                advertiser.register(DeviceIdentity.serviceName(this), installId)
+                refreshIdle()
+            }
+            .setNeutralButton(R.string.rename_reset) { _, _ ->
+                DeviceIdentity.setServiceName(this, null)
+                advertiser.register(DeviceIdentity.serviceName(this), installId)
+                refreshIdle()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     @Suppress("DEPRECATION")
@@ -259,7 +292,8 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
                 idleTitle.text = getString(R.string.ready_title)
                 val addrs = DeviceIdentity.ipv4Addresses().joinToString("  ")
                 idleDetail.text = getString(R.string.ready_detail, name) +
-                    if (addrs.isNotEmpty()) "\n\n" + getString(R.string.addresses, addrs) else ""
+                    (if (addrs.isNotEmpty()) "\n\n" + getString(R.string.addresses, addrs) else "") +
+                    "\n\n" + getString(R.string.rename_hint)
             }
         }
     }

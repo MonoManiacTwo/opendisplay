@@ -31,6 +31,7 @@ object DeviceIdentity {
         }
         val model = Build.MODEL
         val maker = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+        if (maker.isBlank() || maker.equals("unknown", ignoreCase = true)) return model
         return if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model"
     }
 

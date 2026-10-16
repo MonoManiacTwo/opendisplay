@@ -14,6 +14,7 @@ import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.SequenceInputStream
@@ -58,7 +59,9 @@ class ReceiverServer(
     private val lock = Any()
     @Volatile private var running = false
     private var serverSocket: ServerSocket? = null
-    private var current: Session? = null
+    /** Volatile so the UDP cursor thread can check it without taking [lock]. */
+    @Volatile private var current: Session? = null
+    private var generation = 0
     private val candidates = mutableListOf<Socket>()
     private var timers: ScheduledExecutorService? = null
     private var cursorChannel: CursorChannel? = null
@@ -69,9 +72,10 @@ class ReceiverServer(
     private val loggedUnknownTypes = HashSet<String>()
 
     fun start() {
-        synchronized(lock) {
+        val gen = synchronized(lock) {
             if (running) return
             running = true
+            ++generation
         }
         cursorChannel = CursorChannel(port + 1, ::onCursorDatagram, ::ackCursorFlow).also { it.start() }
         timers = Executors.newSingleThreadScheduledExecutor { r ->
@@ -80,7 +84,7 @@ class ReceiverServer(
             t.scheduleWithFixedDelay(::tick, 2, 2, TimeUnit.SECONDS)
             t.scheduleWithFixedDelay(::sendStats, 5, 5, TimeUnit.SECONDS)
         }
-        Thread(::acceptLoop, "od-accept").apply { isDaemon = true }.start()
+        Thread({ acceptLoop(gen) }, "od-accept").apply { isDaemon = true }.start()
     }
 
     /** Ends the session with a best-effort courtesy message (`sleeping` or `closing`). */
@@ -89,6 +93,7 @@ class ReceiverServer(
         synchronized(lock) {
             if (!running) return
             running = false
+            generation++ // a quick stop/start must not leave two accept loops
             session = current
             current = null
             candidates.forEach { closeQuietly(it) }
@@ -108,8 +113,10 @@ class ReceiverServer(
 
     // region Accept and adopt
 
-    private fun acceptLoop() {
-        while (running) {
+    private fun live(gen: Int) = running && gen == generation
+
+    private fun acceptLoop(gen: Int) {
+        while (live(gen)) {
             val server = try {
                 ServerSocket().apply {
                     reuseAddress = true
@@ -121,7 +128,7 @@ class ReceiverServer(
                 continue
             }
             synchronized(lock) {
-                if (!running) {
+                if (!live(gen)) {
                     closeQuietly(server)
                     return
                 }
@@ -129,14 +136,14 @@ class ReceiverServer(
             }
             Log.i(TAG, "listening on TCP $port")
             try {
-                while (running) {
+                while (live(gen)) {
                     val socket = server.accept()
                     socket.tcpNoDelay = true // tiny input packets must not wait for ACKs
                     socket.keepAlive = true
                     onAccepted(socket)
                 }
             } catch (e: IOException) {
-                if (running) Log.w(TAG, "accept failed: $e; relistening")
+                if (live(gen)) Log.w(TAG, "accept failed: $e; relistening")
             } finally {
                 closeQuietly(server)
             }
@@ -199,7 +206,7 @@ class ReceiverServer(
             candidates.clear()
             // Per-session state: the sender restarts its cursor sequence, and
             // the old session's UDP flow must not leak into this one.
-            cursorChannel?.retireFlow()
+            cursorChannel?.retireFlow() // waits out an in-flight datagram
             cursorSeq.reset()
             clock.reset()
             senderPv = WireProtocol.ASSUMED_WHEN_ABSENT
@@ -266,6 +273,16 @@ class ReceiverServer(
         } catch (_: Exception) {
             return // 6: unparseable control MUST be ignored
         }
+        try {
+            dispatchControl(obj)
+        } catch (e: Exception) {
+            // A malformed field (a string where a number belongs) is the
+            // sender's bug, never a reason to drop the session or crash.
+            Log.w(TAG, "ignored malformed ${obj.optString("type")}: $e")
+        }
+    }
+
+    private fun dispatchControl(obj: JSONObject) {
         when (val type = obj.optString("type")) {
             "pong" -> {
                 if (obj.has("t") && obj.has("mt")) {
@@ -313,8 +330,14 @@ class ReceiverServer(
         return true
     }
 
+    /**
+     * Runs on the UDP thread while CursorChannel holds its lock, so adopt()'s
+     * retireFlow() cannot interleave between the flow check and the apply
+     * (an old session's high `s` would otherwise become the new floor).
+     * Must not take [lock]: adopt() holds it while calling into the channel.
+     */
     private fun onCursorDatagram(obj: JSONObject, newFlow: Boolean): Boolean {
-        if (synchronized(lock) { current } == null) return false
+        if (current == null) return false
         if (obj.optString("type") != "cursor") return false
         // The tracker resets on every new UDP flow (6.3).
         if (newFlow) cursorSeq.reset()
@@ -398,7 +421,13 @@ class ReceiverServer(
 
         private fun readLoop() {
             try {
-                var stream: InputStream = socket.getInputStream()
+                // 8.2 counts silence in bytes, not frames: a big keyframe on
+                // slow Wi-Fi can take longer than the watchdog to arrive.
+                var stream: InputStream = object : FilterInputStream(socket.getInputStream()) {
+                    override fun read(): Int = super.read().also { lastReceive = SystemClock.elapsedRealtime() }
+                    override fun read(b: ByteArray, off: Int, len: Int): Int =
+                        super.read(b, off, len).also { lastReceive = SystemClock.elapsedRealtime() }
+                }
                 if (initial != null) stream = SequenceInputStream(ByteArrayInputStream(initial), stream)
                 val input = DataInputStream(BufferedInputStream(stream, 256 * 1024))
                 while (isOpen) {

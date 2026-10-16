@@ -50,10 +50,10 @@ class TouchGesturesTest {
     @Test
     fun dragPastSlopStartsAtTheLandingPoint() {
         g.down(p(100f, 100f))
-        g.move(1, p(105f, 100f), p(105f, 100f), 1f) // inside slop: nothing
-        assertEquals(emptyList<String>(), events)
+        g.move(1, p(105f, 100f), p(105f, 100f), 1f) // inside slop: cursor only
+        assertEquals(listOf("moved 0.11,0.10"), events)
         g.move(1, p(200f, 100f), p(200f, 100f), 1f)
-        assertEquals(listOf("began 0.10,0.10", "moved 0.20,0.10"), events)
+        assertEquals(listOf("moved 0.11,0.10", "began 0.10,0.10", "moved 0.20,0.10"), events)
     }
 
     @Test

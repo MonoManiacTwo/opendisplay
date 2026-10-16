@@ -91,7 +91,13 @@ class TouchGestures(
         lastNorm = primary
         val pending = pendingDown
         if (pending != null && !downSent) {
-            if (hypot(primary.px - pending.px, primary.py - pending.py) < dragSlopPx) return
+            if (hypot(primary.px - pending.px, primary.py - pending.py) < dragSlopPx) {
+                // Still deciding: track the cursor (a move without a down is
+                // a mouseMoved on the Mac) but keep the button up, so a
+                // second finger can still turn this into a scroll.
+                output.touch("moved", primary.nx, primary.ny)
+                return
+            }
             commitPendingDown()
         }
         if (downSent) output.touch("moved", primary.nx, primary.ny)

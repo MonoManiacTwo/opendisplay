@@ -13,6 +13,7 @@ import app.opendisplay.android.protocol.Codec
 import app.opendisplay.android.protocol.SpsParser
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 
@@ -34,10 +35,10 @@ class VideoDecoder(private val callbacks: Callbacks) {
 
     private sealed class Work {
         class Frame(val unit: AccessUnit, val receivedNanos: Long) : Work()
-        class SetSurface(val surface: Surface?) : Work()
+        class SetSurface(val surface: Surface?, val done: CountDownLatch?) : Work()
         class SetStream(val codec: Codec, val width: Int, val height: Int) : Work()
         object Reset : Work()
-        object Fail : Work()
+        class Fail(val failed: MediaCodec) : Work()
         object Quit : Work()
     }
 
@@ -72,47 +73,37 @@ class VideoDecoder(private val callbacks: Callbacks) {
 
     @Volatile private var decoderLive = false
 
+    /** Raised when a frame overflowed the decoder's input buffers (some OMX caps). */
+    private var minInputSize = 2 shl 20
+
     fun start() = thread.start()
 
-    fun setSurface(surface: Surface?) = queue.put(Work.SetSurface(surface))
+    fun setSurface(surface: Surface?) = queue.put(Work.SetSurface(surface, null))
+
+    /**
+     * The surface is about to be destroyed: stop rendering into it before
+     * returning, since some vendor codecs fault on a vanished surface.
+     */
+    fun detachSurface() {
+        val done = CountDownLatch(1)
+        queue.offerFirst(Work.SetSurface(null, done))
+        done.await(500, TimeUnit.MILLISECONDS)
+    }
 
     /** From `streamConfig`: the codec to expect and the announced raster. */
     fun setStream(codec: Codec, width: Int, height: Int) = queue.put(Work.SetStream(codec, width, height))
 
-    /** New session: forget the old stream entirely. */
+    /** New session: forget the old stream entirely (pending commands stay). */
     fun reset() {
-        queue.clear()
+        queue.removeAll { it is Work.Frame }
         queue.put(Work.Reset)
     }
 
-    fun submit(unit: AccessUnit) {
-        // Falling behind adds latency to every later frame. Drop the backlog
-        // and recover from a keyframe instead of decoding stale pictures.
-        // Only once a decoder runs: while one is being created the queue
-        // fills by design and drains in a burst right after.
-        val limit = if (decoderLive) MAX_BACKLOG else MAX_STARTUP_BACKLOG
-        if (queue.size > limit) {
-            val kept = queue.filter { it !is Work.Frame }
-            droppedFrames += queue.size - kept.size
-            queue.clear()
-            kept.forEach { queue.put(it) }
-            queue.put(Work.Frame(unit, SystemClock.elapsedRealtimeNanos()))
-            markLost("decode backlog")
-            return
-        }
-        queue.put(Work.Frame(unit, SystemClock.elapsedRealtimeNanos()))
-    }
+    fun submit(unit: AccessUnit) = queue.put(Work.Frame(unit, SystemClock.elapsedRealtimeNanos()))
 
     fun release() {
-        queue.clear()
+        queue.removeAll { it is Work.Frame }
         queue.put(Work.Quit)
-    }
-
-    @Volatile private var lostFlag = false
-
-    private fun markLost(why: String) {
-        Log.i(TAG, "decode lost ($why); waiting for a keyframe")
-        lostFlag = true
     }
 
     // region Input thread
@@ -120,13 +111,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
     private fun inputLoop() {
         while (true) {
             when (val work = queue.take()) {
-                is Work.Frame -> {
-                    if (lostFlag) {
-                        lostFlag = false
-                        awaitingKeyframe = true
-                    }
-                    handleFrame(work)
-                }
+                is Work.Frame -> if (!skipBacklog(work)) handleFrame(work)
                 is Work.SetSurface -> {
                     teardown()
                     surface = work.surface
@@ -135,6 +120,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
                         prewarm()
                         requestKeyframe(force = true)
                     }
+                    work.done?.countDown()
                 }
                 is Work.SetStream -> {
                     if (work.codec != codec) {
@@ -157,7 +143,8 @@ class VideoDecoder(private val callbacks: Callbacks) {
                     inFlight.clear()
                     prewarm()
                 }
-                Work.Fail -> fail("output", null)
+                // A Fail from a decoder already replaced must not kill its successor.
+                is Work.Fail -> if (work.failed === decoder) fail("output", null)
                 Work.Quit -> {
                     teardown()
                     spare?.release()
@@ -167,6 +154,33 @@ class VideoDecoder(private val callbacks: Callbacks) {
             }
         }
     }
+
+    /**
+     * Falling behind adds latency to every later frame, so a backlog is cut
+     * rather than decoded. If a keyframe is queued, skip to it for free;
+     * otherwise drop everything and ask for one. While a decoder is still
+     * being created the queue fills by design, hence the higher limit.
+     * Returns true when [work] itself was dropped.
+     */
+    private fun skipBacklog(work: Work.Frame): Boolean {
+        val limit = if (decoderLive) MAX_BACKLOG else MAX_STARTUP_BACKLOG
+        val pending = queue.filterIsInstance<Work.Frame>()
+        if (pending.size <= limit) return false
+        val lastKey = pending.indexOfLast { isKeyframe(it.unit) }
+        val drop = if (lastKey >= 0) pending.subList(0, lastKey) else pending
+        drop.forEach { queue.remove(it) }
+        droppedFrames += drop.size + 1
+        Log.i(TAG, "decode backlog: dropped ${drop.size + 1} frames" +
+            if (lastKey >= 0) ", resuming at a queued keyframe" else "")
+        if (lastKey < 0) {
+            awaitingKeyframe = true
+            requestKeyframe(force = true)
+        }
+        return true
+    }
+
+    private fun isKeyframe(unit: AccessUnit) =
+        unit.nalus.any { AnnexB.isKeyframeSlice(codec, AnnexB.nalType(codec, it)) }
 
     private fun handleFrame(work: Work.Frame) {
         val params = ArrayList<ByteArray>(3)
@@ -224,11 +238,15 @@ class VideoDecoder(private val callbacks: Callbacks) {
             val buffer: ByteBuffer = inputBuffer(codec, index)
             buffer.clear()
             if (data.size > buffer.capacity()) {
-                Log.w(TAG, "frame of ${data.size} B exceeds input buffer ${buffer.capacity()} B")
+                // The next keyframe is just as big: rebuild with room for it,
+                // or this repeats forever.
+                Log.w(TAG, "frame of ${data.size} B exceeds input buffer ${buffer.capacity()} B; rebuilding")
                 codec.queueInputBuffer(index, 0, 0, 0, 0)
                 droppedFrames++
+                minInputSize = maxOf(minInputSize, data.size * 3 / 2)
+                teardown()
                 awaitingKeyframe = true
-                requestKeyframe()
+                requestKeyframe(force = true)
                 return
             }
             buffer.put(data)
@@ -260,7 +278,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
             Codec.HEVC -> format.setByteBuffer("csd-0", ByteBuffer.wrap(AnnexB.join(parameterSets)))
         }
         // Size the input buffers for a keyframe of the largest raster.
-        format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, maxOf(width * height, 2 shl 20))
+        format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, maxOf(width * height, minInputSize))
         if (Build.VERSION.SDK_INT >= 23) {
             format.setInteger(MediaFormat.KEY_PRIORITY, 0) // realtime
         }
@@ -384,11 +402,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
                 val index = try {
                     codec.dequeueOutputBuffer(info, OUTPUT_TIMEOUT_US)
                 } catch (e: IllegalStateException) {
-                    if (running) {
-                        Log.w(TAG, "output failed", e)
-                        markLost("output error")
-                        queue.offerFirst(Work.Fail)
-                    }
+                    failed(e)
                     return
                 }
                 when {
@@ -396,6 +410,7 @@ class VideoDecoder(private val callbacks: Callbacks) {
                         try {
                             codec.releaseOutputBuffer(index, true)
                         } catch (e: IllegalStateException) {
+                            failed(e)
                             return
                         }
                         val meta = inFlight.remove(info.presentationTimeUs)
@@ -404,6 +419,13 @@ class VideoDecoder(private val callbacks: Callbacks) {
                     index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> reportSize(codec.outputFormat)
                 }
             }
+        }
+
+        /** Nothing drains this codec any more: have the input thread rebuild it. */
+        private fun failed(e: Exception) {
+            if (!running) return
+            Log.w(TAG, "decoder output failed", e)
+            queue.offerFirst(Work.Fail(codec))
         }
 
         private fun reportSize(format: MediaFormat) {

@@ -73,6 +73,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     @Volatile private var streamInfo: String? = null
     @Volatile private var senderAsleep = false
     @Volatile private var senderHealth: JSONObject? = null
+    @Volatile private var unsupportedCodec = false
 
     // Main-thread state.
     private var connected = false
@@ -118,6 +119,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
 
     override fun onStop() {
         super.onStop()
+        main.removeCallbacks(resendHello)
         advertiser.unregister()
         // Locked or backgrounded: the sender keeps waiting for us to come
         // back (`sleeping`). Finishing ends the session for good (`closing`).
@@ -150,7 +152,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) = decoder.setSurface(holder.surface)
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) = decoder.setSurface(null)
+            override fun surfaceDestroyed(holder: SurfaceHolder) = decoder.detachSurface()
         })
 
         // Covers a stale picture while the sender sleeps (6.2 `sleeping`).
@@ -230,6 +232,9 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         idlePanel.visibility = if (streaming || (connected && senderAsleep)) View.GONE else View.VISIBLE
         blank.visibility = if (connected && senderAsleep) View.VISIBLE else View.GONE
         cursorView.visibility = if (streaming) View.VISIBLE else View.INVISIBLE
+        // Input is gated on streaming: a gesture cut off here must still
+        // release the button (and drop a pending hold) on the sender.
+        if (!streaming) gestures.cancel()
         val keepOn = connected && !senderAsleep
         if (keepOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -289,9 +294,15 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
         panel = next
         videoCaps = DecoderCaps.videoCaps(w, h)
         Log.i(TAG, "panel ${w}x$h @${next.scale}, caps $videoCaps")
-        // 6.1: re-send hello on the live connection whenever the panel changes.
-        if (connected) Thread { server.sendHello() }.start()
+        // 6.1: re-send hello on the live connection whenever the panel
+        // changes. Settle first: locking rotates to the lock screen's
+        // orientation just before onStop, and that hello would make the
+        // sender rebuild its display for a session about to sleep.
+        main.removeCallbacks(resendHello)
+        if (connected) main.postDelayed(resendHello, 250)
     }
+
+    private val resendHello = Runnable { Thread { server.sendHello() }.start() }
 
     @Suppress("DEPRECATION")
     private fun maxRefreshRate(): Int {
@@ -312,7 +323,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     // region Input
 
     private fun onTouch(event: MotionEvent): Boolean {
-        if (!connected || !hasPicture || senderAsleep) return true
+        if (!connected || !hasPicture || senderAsleep || blockingMessage != null) return true
         val action = event.actionMasked
         // Three fingers toggle the perf overlay and never reach the sender.
         if (action == MotionEvent.ACTION_POINTER_DOWN && event.pointerCount == 3) {
@@ -331,8 +342,17 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
             MotionEvent.ACTION_DOWN -> gestures.down(primary)
             MotionEvent.ACTION_POINTER_DOWN -> gestures.pointerDown(event.pointerCount, centroid(event))
             MotionEvent.ACTION_POINTER_UP -> gestures.pointerUp()
-            MotionEvent.ACTION_MOVE ->
+            MotionEvent.ACTION_MOVE -> {
+                // Android batches touch samples per frame; forward each one so
+                // the sender gets the full-rate drag, like the iOS receiver.
+                if (event.pointerCount == 1) {
+                    for (h in 0 until event.historySize) {
+                        val past = point(event.getHistoricalX(0, h), event.getHistoricalY(0, h))
+                        gestures.move(1, past, past, videoFrame.videoScale)
+                    }
+                }
                 gestures.move(event.pointerCount, primary, centroid(event), videoFrame.videoScale)
+            }
             MotionEvent.ACTION_UP -> gestures.up(primary)
             MotionEvent.ACTION_CANCEL -> gestures.cancel()
         }
@@ -371,6 +391,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     override fun onSessionStarted(transport: String) {
         this.transport = transport
         senderAsleep = false
+        unsupportedCodec = false
         streamInfo = null
         hasPictureFlag = false
         decoder.reset()
@@ -396,7 +417,7 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     }
 
     override fun onVideoFrame(payload: ByteArray) {
-        if (blockingMessage != null) return
+        if (blockingMessage != null || unsupportedCodec) return
         val unit = AnnexB.parse(payload) ?: return
         stats.onFrameReceived(payload.size)
         if (senderAsleep) {
@@ -410,6 +431,9 @@ class MainActivity : Activity(), ReceiverServer.Listener, VideoDecoder.Callbacks
     override fun onStreamConfig(codec: Codec?, codecToken: String, width: Int, height: Int, fps: Int) {
         Log.i(TAG, "streamConfig $codecToken ${width}x$height @$fps")
         val offered = codec != null && videoCaps.any { it.codec == codec }
+        // Decoding it as the previous codec would only produce garbage and a
+        // keyframe storm: ignore video until a stream we can decode is announced.
+        unsupportedCodec = codec == null || !offered
         if (codec == null || !offered) {
             Log.w(TAG, "sender selected a codec we did not offer: $codecToken")
             return

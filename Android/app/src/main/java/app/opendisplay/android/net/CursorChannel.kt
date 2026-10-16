@@ -76,9 +76,12 @@ class CursorChannel(
                 continue
             }
             val flow = packet.socketAddress
-            val newFlow = synchronized(this) {
+            // Decide the flow and apply under one lock: retireFlow() for a new
+            // session then cannot slip in between and let a stale datagram
+            // set the new session's sequence floor.
+            val sendAck = synchronized(this) {
                 if (flow in retiredFlows) {
-                    null
+                    false
                 } else {
                     val isNew = flow != currentFlow
                     if (isNew) {
@@ -86,20 +89,15 @@ class CursorChannel(
                         currentFlow = flow
                         acked = false
                     }
-                    isNew
-                }
-            } ?: continue
-            if (onDatagram(obj, newFlow)) {
-                val sendAck = synchronized(this) {
-                    if (!acked && flow == currentFlow) {
+                    if (onDatagram(obj, isNew) && !acked) {
                         acked = true
                         true
                     } else false
                 }
-                if (sendAck) {
-                    Log.i(TAG, "cursor UDP flow from $flow confirmed")
-                    onFirstAccepted()
-                }
+            }
+            if (sendAck) {
+                Log.i(TAG, "cursor UDP flow from $flow confirmed")
+                onFirstAccepted()
             }
         }
     }

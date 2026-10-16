@@ -30,7 +30,12 @@ object Framing {
         if (length < 0 || length > MAX_INBOUND_PAYLOAD) {
             throw IOException("bad frame length $length")
         }
-        val payload = ByteArray(length)
+        val payload = try {
+            ByteArray(length)
+        } catch (_: OutOfMemoryError) {
+            // Old low-memory devices: drop the session, not the app.
+            throw IOException("no memory for a $length B frame")
+        }
         input.readFully(payload)
         return payload
     }

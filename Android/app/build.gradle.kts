@@ -9,7 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "app.opendisplay.android"
-        minSdk = 21
+        // Google Play rejects bundles below API 24 (its automatic protection
+        // requires it), so Play builds pass -PappMinSdk=24. The GitHub APK
+        // keeps 21 for Android 5 and 6 devices.
+        minSdk = (findProperty("appMinSdk") as String?)?.toInt() ?: 21
         targetSdk = 36
         // CI passes the shared repo version (release-please) as Gradle
         // properties; local builds fall back to these defaults.

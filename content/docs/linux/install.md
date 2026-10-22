@@ -28,7 +28,7 @@ is needed. They need:
 Unpack it and run the installer:
 
 ```sh
-tar xf od-sender-*-linux-gnu.tar.gz && cd od-sender-*-linux-gnu
+tar xf od-sender-$(uname -m)-unknown-linux-gnu.tar.gz && cd od-sender-$(uname -m)-unknown-linux-gnu
 ./install.sh                 # into ~/.local/bin, with the desktop entry and systemd --user unit
 sudo ./install.sh --system   # or into /usr/local for every user
 ```

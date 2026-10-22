@@ -48,9 +48,8 @@ use and about 60 ms of latency, against ~20 ms for a phone.
 
 ## Install
 
-Two ways, both from the
-[`linux-v0.1.0-beta.1` pre-release](https://github.com/peetzweg/opendisplay/releases/tag/linux-v0.1.0-beta.1)
-(Linux releases are pre-releases, so they do not show up as "Latest").
+Two ways, both from the [latest OpenDisplay release](https://github.com/peetzweg/opendisplay/releases/latest). Linux ships in
+every release, with the same version number as the Mac and iOS apps.
 
 ### Prebuilt tarball (any distribution)
 
@@ -64,7 +63,7 @@ are in `THIRD-PARTY-LICENSES.txt`. Download the one for your machine
 (`uname -m`), unpack it and run the installer:
 
 ```sh
-tar xf od-sender-*-linux-gnu.tar.gz && cd od-sender-*-linux-gnu
+tar xf od-sender-$(uname -m)-unknown-linux-gnu.tar.gz && cd od-sender-$(uname -m)-unknown-linux-gnu
 ./install.sh                 # into ~/.local/bin, with the desktop entry and systemd --user unit
 sudo ./install.sh --system   # or into /usr/local for every user
 ./install.sh --uninstall     # removes them again (add --system for /usr/local)
@@ -391,7 +390,7 @@ systemctl --user enable --now od-receiver     # optional: start with your sessio
 ```
 
 **Any distribution:** the Flatpak bundle attached to the
-[pre-release](https://github.com/peetzweg/opendisplay/releases/tag/linux-v0.1.0-beta.1),
+[latest release](https://github.com/peetzweg/opendisplay/releases/latest),
 for your machine (`uname -m`). Its GNOME runtime comes from Flathub:
 
 ```sh

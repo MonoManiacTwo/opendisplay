@@ -284,7 +284,7 @@ Plasma 6.8+ and GNOME 50+** are experimental. Video is CPU-encoded for now
 (VA-API planned), and the stream is not encrypted, so use a network you trust.
 
 Install it from the
-[`linux-v0.1.0-beta.1` pre-release](https://github.com/peetzweg/opendisplay/releases/tag/linux-v0.1.0-beta.1):
+[latest release](https://github.com/peetzweg/opendisplay/releases/latest) (Linux ships in every OpenDisplay release, same version as the Mac and iOS apps):
 the x86_64/aarch64 tarball with its `install.sh` works on any distribution,
 and on Arch / Omarchy you can instead build the package from this repository
 with `makepkg -si`
@@ -304,7 +304,7 @@ a problem are in [linux/README.md](linux/README.md).
 `od-receiver` turns a Linux machine's screen into the display, for a Mac or
 a Linux desktop. It is tested windowed on Asahi Linux / Hyprland (aarch64),
 at 24 ms end to end; other desktops are expected to work. Install it from
-the same pre-release as a Flatpak bundle (any distribution) or, on Arch /
+the same release as a Flatpak bundle (any distribution) or, on Arch /
 Omarchy, build its package from this repository with `makepkg -si`; see
 [linux/README.md#linux-receiver-beta](linux/README.md#linux-receiver-beta).
 Reports go to [#284](https://github.com/peetzweg/opendisplay/issues/284).

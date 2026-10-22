@@ -1,5 +1,9 @@
 # OpenDisplay Linux sender (beta)
 
+> **Docs:** the same guide, split into pages (install, usage, configuration,
+> desktops, receiver, troubleshooting), is at
+> **[opendisplay.app/docs/linux](https://opendisplay.app/docs/linux/)**.
+
 The OpenDisplay Linux sender (`od-sender`) extends a Linux desktop onto an
 OpenDisplay receiver: an iPhone, iPad, Android device or spare Mac running the
 OpenDisplay app. It creates a **virtual display** on your desktop sized for

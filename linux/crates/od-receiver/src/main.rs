@@ -11,7 +11,7 @@ use tracing::{info, warn};
 
 /// OpenDisplay receiver for Linux.
 #[derive(Parser, Debug)]
-#[command(version, about)]
+#[command(version = env!("OD_RECEIVER_VERSION"), about)]
 struct Args {
     /// TCP listen address (§1: the receiver listens).
     #[arg(long, default_value = "0.0.0.0:9000")]

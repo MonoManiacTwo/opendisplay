@@ -3,6 +3,7 @@ mod bounded;
 mod config;
 mod desktop;
 mod dev;
+mod disconnect;
 mod discover;
 mod doctor;
 mod encoder;
@@ -151,6 +152,13 @@ enum Cmd {
     Doctor {
         #[command(flatten)]
         backend: BackendArgs,
+    },
+    /// Disconnect a running sender from any terminal, like Ctrl+C in its own
+    /// (all of them when no receiver is named).
+    Disconnect {
+        /// Receiver name as given to `connect`/`--to`, or the virtual display (od-…).
+        #[arg(value_name = "RECEIVER")]
+        receiver: Option<String>,
     },
     /// Remove virtual displays left behind by senders that are no longer running.
     Clean {
@@ -372,6 +380,7 @@ fn real_main() -> Result<i32> {
                 return Ok(detect::EXIT_UNSUPPORTED);
             }
         }
+        Cmd::Disconnect { receiver } => return disconnect::run(receiver.as_deref()),
         Cmd::Clean { backend } => {
             let mut backend = detect::detect(&backend.request())?;
             let removed = backend.clean()?;

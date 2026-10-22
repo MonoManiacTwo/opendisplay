@@ -59,7 +59,6 @@ pub fn dir() -> PathBuf {
 
 /// Every output lock name in [`dir`], held or not (lock files outlive their
 /// locks).
-#[cfg_attr(not(feature = "kde"), allow(dead_code))] // only KDE's clean asks yet
 pub fn names() -> Result<Vec<String>> {
     let Ok(entries) = std::fs::read_dir(dir()) else {
         return Ok(Vec::new());

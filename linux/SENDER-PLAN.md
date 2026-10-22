@@ -560,8 +560,8 @@ the language makes direct reuse moot. Findings:
 | 6 iMac latency | answered (PLAN.md M3: encode-bound; 55-67 ms p50 after fixes) | hardware encode (#360) |
 | 7 UX | done: `--to`, `list`, `doctor`, `clean`, `dev`, config file, desktop entry, user unit | — |
 | 8 CI: Sway + PKGBUILD | done (`arch-package` job green) | mutation check once |
-| 9 Release pipeline | workflow green on PRs and manual runs; static FFmpeg tarballs | first `linux-v*` tag |
-| 10 AUR package | PKGBUILD split (`opendisplay-sender`) built in CI | publish to the AUR; `makepkg -si`/`namcap` here |
+| 9 Release pipeline | unified with the app (§8.1): `release.yml` calls `linux-release.yml` with the `vX.Y.Z` tag; static FFmpeg tarballs and receiver Flatpaks attached to the app's release; green on PRs and manual runs | first app release after the merge |
+| 10 Arch package | PKGBUILD split (`opendisplay-sender`, `opendisplay-receiver`) built in CI; `pkgver` = app version | `bump.sh X.Y.Z` after the first release with Linux; AUR publication later; `makepkg -si`/`namcap` here |
 | 11 Website and docs | `linux/README.md` and the card on `linux/site-beta` | merge it |
 | 12 Beta checklist | — | all |
 
@@ -654,22 +654,28 @@ touch the real session.
    sender PKGBUILD (first execution of it anywhere), then the Adopt smoke
    against `od-receiver --sink none`. *Verify:* green on a PR; the job fails
    when capture is deliberately broken (mutation check once).
-9. **Release pipeline.** A `linux-release.yml` triggered by tags
-   `linux-v*` (manual `git tag linux-v0.1.0-beta.1`): build on
-   `ubuntu-24.04` and `ubuntu-24.04-arm`, run tests, upload
-   `od-sender-<ver>-<arch>-unknown-linux-gnu.tar.gz` + `.sha256` to a GitHub
-   **pre-release**. Until §3.5 option C lands, label the tarballs "built
-   against FFmpeg 6 (Ubuntu 24.04); Arch users: install from the AUR". See
-   §8.1 for the release-please question. *Verify:* dry-run on a fork or a
-   `linux-v0.0.1-test` tag deleted afterwards; `tar` contents and checksums.
-10. **AUR package.** Split the PKGBUILD: `opendisplay-sender` (depends
-    `ffmpeg wayland`, makedepends `cargo pkgconf clang`, `arch=(x86_64
-    aarch64)`, source = the `linux-v*` tag tarball, `.desktop` + user unit;
-    `provides=(od-sender)`). The receiver stays out of the AUR until its own
-    beta (its GStreamer dependency set would otherwise be pulled onto every
-    sender user). *Verify:* `makepkg -si` here, `namcap`, `yay -S
-    opendisplay-sender` from the published AUR package, `pacman -Ql`, run
-    from `/usr/bin`.
+9. **Release pipeline (unified, §8.1).** `linux-release.yml` is a reusable
+   workflow: `release.yml` calls it (job `build-linux`) when release-please
+   creates a release, with that release's `vX.Y.Z` tag. It builds on
+   `ubuntu-24.04` and `ubuntu-24.04-arm` from the tag, checks the tag
+   against the workspace version, runs tests, and uploads
+   `od-sender-<arch>-unknown-linux-gnu.tar.gz` (static FFmpeg, §3.5 C) and
+   `od-receiver-<arch>.flatpak`, each with a `.sha256`, to the **same
+   GitHub release** as the Mac DMGs (`gh release upload --clobber`), then
+   appends a "Linux (beta)" section to its notes. No `linux-v*` tags, no
+   separate pre-release. Pull requests and manual runs build and
+   smoke-test without uploading. *Verify:* the PR/dispatch smoke; the first
+   real release's assets and notes.
+10. **Arch packages.** Split PKGBUILDs: `opendisplay-sender` (depends
+    `ffmpeg libpipewire`, makedepends `cargo pkgconf clang`, `arch=(x86_64
+    aarch64)`, source = the `vX.Y.Z` tag tarball, `.desktop` + user unit)
+    and `opendisplay-receiver`. `pkgver` is the app version as is
+    (`_tag=v${pkgver}`); after each release `bump.sh X.Y.Z` records the
+    tarball checksum and regenerates `.SRCINFO`. Until the packages are on
+    the AUR, users build from the release tag with `from-checkout.sh -si`
+    (it takes the version from the checkout). *Verify:* `makepkg -si`
+    here, `namcap`, `pacman -Ql`, run from `/usr/bin`; later `yay -S
+    opendisplay-sender` from the published AUR package.
 11. **Website and docs.** In `src/App.tsx` add a third sender card "Linux
     <Beta>" next to macOS (reuse `.beta-tag` and the Android beta-steps
     pattern): `yay -S opendisplay-sender`, "Omarchy / Hyprland 0.55+; other
@@ -682,7 +688,8 @@ touch the real session.
     *Verify:* `pnpm build` locally; links resolve.
 12. **Beta checklist run and merge.** Walk §1.2 on this machine, record
     results in PLAN.md M3 status, undraft PR #298 (or split the sender into
-    its own PR if #298 is too large to review), merge, tag `linux-v0.1.0`.
+    its own PR if #298 is too large to review), merge; the next app release
+    (release-please's `vX.Y.Z`) carries the Linux beta.
 
 Steps 5 and 6 can interleave with 7-11; 1-4 are prerequisites for everything.
 
@@ -745,16 +752,33 @@ What that means for `od-sender`, in priority order:
 
 ## 8. Risks and open decisions (with recommendations)
 
-1. **Release stream.** `release.yml` uses release-please `simple`: a
-   `feat(linux):` merge bumps the app version and triggers a Mac/iOS build
-   with no Mac change. Options: (a) ride the app release (one version, Linux
-   job added to `release.yml`; simplest, but every Linux fix ships a pointless
-   Mac update); (b) separate `linux-v*` tags with a tag-triggered workflow
-   and manual tagging; (c) release-please manifest mode with a `linux`
-   component attributed by path (clean, but changes the Mac flow). *Recommend
-   (b) for the beta, (c) once the beta flow is proven; merge Linux PRs as
-   `feat(linux)`/`fix(linux)` either way and accept one spurious app bump at
-   the #298 merge.*
+1. **Release stream — decided: unified (option a).** One version for every
+   platform, in lockstep, on every release. Options were: (a) ride the app
+   release (one version, Linux job in `release.yml`; every Linux fix also
+   ships a Mac/iOS build); (b) separate `linux-v*` tags with a
+   tag-triggered workflow and manual tagging; (c) release-please manifest
+   mode with a `linux` component attributed by path. The user chose (a):
+   one number to talk about across Mac, iOS, Android and Linux, one release
+   page, and the protocol compatibility story (`RELEASING.md`) stays one
+   table. How it works:
+   * release-please runs in manifest mode (`release-please-config.json`,
+     `.release-please-manifest.json`) with the single root package still
+     `release-type: simple`, so the tag stays `vX.Y.Z` and the Mac/iOS
+     `MARKETING_VERSION` still comes from it. Its `extra-files` bump
+     `linux/Cargo.toml` `[workspace.package] version` and the workspace
+     crates' entries in `linux/Cargo.lock` in the release PR, so the tag's
+     tree builds with `--locked` (PKGBUILD, Flatpak, release workflow).
+   * `release.yml` calls `linux-release.yml` with the tag; it uploads the
+     tarballs and Flatpaks to the same release and appends the Linux notes.
+   * `od-sender`/`od-receiver --version` print the tag (`build-version.rs`:
+     `$OD_SENDER_VERSION`/`$OD_RECEIVER_VERSION`, else `git describe
+     --match 'v[0-9]*'`, else the workspace version).
+   * The PKGBUILDs' `pkgver` is the app version; `bump.sh X.Y.Z` after each
+     release.
+   Cost accepted: a `fix(linux):` merge cuts an app release with an
+   unchanged Mac/iOS build (Sparkle offers it, TestFlight gets a build).
+   Merge Linux PRs as `feat(linux)`/`fix(linux)`; a Linux-only change that
+   should not release can go in as `chore(linux)`/`ci(linux)`.
 2. **Packaging.** Source AUR (`opendisplay-sender`) at beta; static FFmpeg
    for generic tarballs after. *Recommend as in §3.5.* Open: package name
    (`opendisplay-sender` vs the existing all-in-one `opendisplay`); *recommend

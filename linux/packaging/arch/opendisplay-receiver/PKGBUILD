@@ -1,18 +1,19 @@
 # Maintainer: Philip Poloczek <839848+peetzweg@users.noreply.github.com>
 #
-# AUR source package for od-receiver, built from a `linux-v*` release tag:
+# AUR source package for od-receiver, built from an OpenDisplay `vX.Y.Z`
+# release tag (one version for all platforms; see RELEASING.md):
 # turns this machine's screen into an OpenDisplay receiver (a GTK 4 window
 # that fullscreens itself, draws the sender's cursor and sends pointer input
 # back).
 #
-#   ./bump.sh 0.1.0-beta.1      new tag: pkgver, sha256sums, .SRCINFO
+#   ./bump.sh 1.26.0            new release: pkgver, sha256sums, .SRCINFO
 #   ./from-checkout.sh          build this checkout's HEAD instead of the tag
 #
 # The desktop entry and user unit ship inside the tag tarball, next to this
 # file, so the AUR repository only needs PKGBUILD and .SRCINFO.
 
 pkgname=opendisplay-receiver
-pkgver=0.1.0_beta.1
+pkgver=1.25.0
 pkgrel=1
 pkgdesc="OpenDisplay receiver for Linux: use this screen as an extra display for a Mac or Linux desktop"
 arch=('x86_64' 'aarch64')
@@ -38,34 +39,37 @@ makedepends=('cargo' 'pkgconf')
 provides=('od-receiver')
 options=('!lto')  # cargo profile handles LTO
 
-# Tags carry a dash (linux-v0.1.0-beta.1), pkgver cannot; `_` maps back.
-_tag="linux-v${pkgver//_/-}"
+# GitHub names the tarball's top directory opendisplay-${pkgver}: it drops the
+# tag's leading v.
+_tag="v${pkgver}"
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/peetzweg/opendisplay/archive/refs/tags/${_tag}.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {
-  cd "opendisplay-${_tag}/linux"
+  cd "opendisplay-${pkgver}/linux"
   export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$(rustc --print host-tuple)"
 }
 
 build() {
-  cd "opendisplay-${_tag}/linux"
+  cd "opendisplay-${pkgver}/linux"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
+  export OD_RECEIVER_VERSION="${pkgver}"  # no .git in the tarball
   cargo build --frozen --release -p od-receiver
 }
 
 check() {
-  cd "opendisplay-${_tag}/linux"
+  cd "opendisplay-${pkgver}/linux"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
+  export OD_RECEIVER_VERSION="${pkgver}"
   # Loopback only: a fake sender into the receiver, decoding into fakesink.
   cargo test --frozen --release -p od-receiver
 }
 
 package() {
-  cd "opendisplay-${_tag}"
+  cd "opendisplay-${pkgver}"
   local _pkg=linux/packaging/arch/opendisplay-receiver
   install -Dm755 linux/target/release/od-receiver "${pkgdir}/usr/bin/od-receiver"
   install -Dm644 "${_pkg}/app.opendisplay.Receiver.desktop" \

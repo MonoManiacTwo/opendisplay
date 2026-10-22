@@ -14,13 +14,22 @@ Wi-Fi** as your computer. Then:
 ```sh
 od-sender doctor              # what od-sender will use on this desktop
 od-sender list                # receivers on the network: name, address, protocol version, id
-od-sender connect iMac        # connect to a receiver by name; Ctrl+C disconnects
-od-sender run                 # the only receiver on the network
+od-sender connect iMac        # connect to a receiver by name (case doesn't matter)
+od-sender connect             # no name: the only receiver, or pick from a list
+od-sender disconnect iMac     # from any terminal; no name disconnects all
 ```
 
 `od-sender connect <receiver>` and `od-sender run --to <receiver>` are the
-same command. The connection lasts as long as the command runs: **Ctrl+C
-disconnects** and removes the virtual display, running it again reconnects.
+same command. The connection lasts as long as the command runs: **Ctrl+C**
+in its terminal, or `od-sender disconnect` from any other, ends it and removes
+the virtual display. Running `connect` again reconnects.
+
+If several receivers are on the network and you name none, `connect` asks
+which one to use. A name that matches nothing lists the receivers that did
+answer. Scripts and agents get no prompt: `connect` then exits with code 4
+(several receivers) or 3 (none matching) and prints the list, and
+`od-sender list --json` returns the receivers as JSON (`name`, `addr`, `id`,
+`pv`).
 
 `od-sender` detects your desktop (Hyprland, Sway, KDE Plasma or GNOME) and
 creates the virtual display there, by default to the right of your current

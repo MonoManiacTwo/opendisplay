@@ -42,7 +42,7 @@ Each key works at the top of `sender.toml` and as a `run` option.
 
 Only on the command line:
 
-| Option | |
+| Option | What it does |
 |---|---|
 | `--wait` | Keep looking until the receiver appears (the login unit uses it). Off by default |
 | `--backend` | `hyprland`, `wlroots` (Sway), `kde`, `gnome`, or `adopt` with `--output`. Detected by default |

@@ -309,17 +309,12 @@ Omarchy, build its package from this repository with `makepkg -si`; see
 [linux/README.md#linux-receiver-beta](linux/README.md#linux-receiver-beta).
 Reports go to [#284](https://github.com/peetzweg/opendisplay/issues/284).
 
-## Compatible apps
+## Third-party projects
 
-The official apps cover a Mac sender, a Linux sender in beta (see above),
-receivers for iPhone/iPad (iOS 15+), Mac and Android (beta), and a Linux
-receiver in beta.
-Other people have built their own clients that speak the same protocol, so
-you can also use an Android device or an older iPad as a display, or drive
-one from Linux. The wire protocol is specified in
-[PROTOCOL.md](PROTOCOL.md), so a new client can be written against the spec
-instead of reverse-engineered from the Swift sources. If your hardware is
-not covered yet, start here:
+OpenDisplay's own apps cover the Mac and Linux senders and receivers for
+iPhone, iPad, Mac, Android and Linux. Fans have also built their own clients
+against the same protocol ([PROTOCOL.md](PROTOCOL.md)), for example for
+de-Googled Android phones or iPads too old for the official app:
 
 **Android receivers**
 * [gprot42/android-opendisplay](https://github.com/gprot42/android-opendisplay) - GrapheneOS receiver for de-Googled Pixel phones and tablets, Android 8.0+

@@ -14,8 +14,13 @@ Wi-Fi** as your computer. Then:
 ```sh
 od-sender doctor              # what od-sender will use on this desktop
 od-sender list                # receivers on the network: name, address, protocol version, id
+od-sender connect iMac        # connect to a receiver by name; Ctrl+C disconnects
 od-sender run                 # the only receiver on the network
 ```
+
+`od-sender connect <receiver>` and `od-sender run --to <receiver>` are the
+same command. The connection lasts as long as the command runs: **Ctrl+C
+disconnects** and removes the virtual display, running it again reconnects.
 
 `od-sender` detects your desktop (Hyprland, Sway, KDE Plasma or GNOME) and
 creates the virtual display there, by default to the right of your current

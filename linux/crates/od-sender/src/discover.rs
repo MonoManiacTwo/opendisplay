@@ -8,8 +8,10 @@ use mdns_sd::{ServiceDaemon, ServiceEvent};
 use opendisplay_proto::SERVICE_TYPE;
 use tracing::info;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Found {
+    /// The receiver's Bonjour name, e.g. `iMac`.
+    #[serde(rename = "name")]
     pub instance: String,
     pub addr: SocketAddr,
     pub id: Option<String>,
@@ -18,9 +20,9 @@ pub struct Found {
 
 impl Found {
     /// `--to` matching: the instance name contains `to`, or the receiver
-    /// `id` equals it (case-insensitive).
+    /// `id` equals it (both case-insensitive).
     pub fn matches(&self, to: &str) -> bool {
-        self.instance.contains(to)
+        self.instance.to_lowercase().contains(&to.to_lowercase())
             || self
                 .id
                 .as_deref()
@@ -41,11 +43,20 @@ Privacy & Security > Local Network must allow OpenDisplay. Try
 pub struct NoReceiver {
     pub to: Option<String>,
     pub timeout: Duration,
+    /// Receivers that answered but did not match `to`.
+    pub others: Vec<Found>,
 }
 
 impl std::fmt::Display for NoReceiver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.to {
+            Some(t) if !self.others.is_empty() => {
+                writeln!(f, "no receiver matching {t:?}; on the network:")?;
+                for r in &self.others {
+                    writeln!(f, "  {}  ({})", r.instance, r.addr)?;
+                }
+                return write!(f, "connect with: od-sender connect <name>");
+            }
             Some(t) => write!(
                 f,
                 "no receiver matching {t:?} found within {:?}",
@@ -65,7 +76,10 @@ pub struct SeveralReceivers(pub Vec<Found>);
 
 impl std::fmt::Display for SeveralReceivers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "several receivers found; pick one with --to <name>:")?;
+        writeln!(
+            f,
+            "several receivers found; pick one with `od-sender connect <name>`:"
+        )?;
         for r in &self.0 {
             writeln!(
                 f,
@@ -174,13 +188,15 @@ pub fn choose(found: Vec<Found>, to: Option<&str>) -> Choice {
 /// browses until one appears (`run --wait`).
 pub fn find(to: Option<&str>, timeout: Option<Duration>) -> Result<Found> {
     let mut seen: Vec<Found> = Vec::new();
+    let mut others: Vec<Found> = Vec::new();
     browse(timeout.map(|t| Instant::now() + t), |f, deadline| {
-        if seen.iter().any(|s| s.instance == f.instance) {
+        if seen.iter().chain(&others).any(|s| s.instance == f.instance) {
             return false;
         }
         if let Some(t) = to {
             if !f.matches(t) {
                 info!("skipping {}", f.instance);
+                others.push(f);
                 return false;
             }
             seen.push(f);
@@ -195,12 +211,51 @@ pub fn find(to: Option<&str>, timeout: Option<Duration>) -> Result<Found> {
     })?;
     match choose(seen, to) {
         Choice::One(f) => Ok(f),
-        Choice::Several(all) => Err(SeveralReceivers(all).into()),
+        Choice::Several(all) => match pick_interactively(&all) {
+            Some(f) => Ok(f),
+            None => Err(SeveralReceivers(all).into()),
+        },
         Choice::None => Err(NoReceiver {
             to: to.map(Into::into),
             timeout: timeout.unwrap_or_default(),
+            others,
         }
         .into()),
+    }
+}
+
+/// With a person at the terminal (stdin and stderr are terminals), ask which
+/// receiver to use. Scripts, agents and the systemd unit get `None` and the
+/// [`SeveralReceivers`] error instead, so nothing ever waits for input.
+fn pick_interactively(all: &[Found]) -> Option<Found> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return None;
+    }
+    let mut err = std::io::stderr();
+    let _ = writeln!(err, "Several receivers found:");
+    for (i, r) in all.iter().enumerate() {
+        let _ = writeln!(err, "  {}) {}  ({})", i + 1, r.instance, r.addr);
+    }
+    let _ = write!(err, "Connect to which one? [1-{}] ", all.len());
+    let _ = err.flush();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line).ok()?;
+    pick(all, line.trim())
+}
+
+/// The receiver an answer at the [`pick_interactively`] prompt names: its
+/// number, or (part of) its name.
+fn pick(all: &[Found], answer: &str) -> Option<Found> {
+    if answer.is_empty() {
+        return None;
+    }
+    if let Ok(n) = answer.parse::<usize>() {
+        return all.get(n.checked_sub(1)?).cloned();
+    }
+    match choose(all.to_vec(), Some(answer)) {
+        Choice::One(f) => Some(f),
+        _ => None,
     }
 }
 
@@ -258,10 +313,36 @@ mod tests {
     }
 
     #[test]
+    fn names_match_case_insensitively_and_picks_take_numbers_or_names() {
+        let all = vec![r("iMac", "B2"), r("Pixel 10a", "C3")];
+        assert_eq!(
+            choose(all.clone(), Some("imac")),
+            Choice::One(r("iMac", "B2"))
+        );
+        assert_eq!(pick(&all, "2"), Some(r("Pixel 10a", "C3")));
+        assert_eq!(pick(&all, "pixel"), Some(r("Pixel 10a", "C3")));
+        assert_eq!(pick(&all, "3"), None);
+        assert_eq!(pick(&all, "0"), None);
+        assert_eq!(pick(&all, ""), None);
+    }
+
+    #[test]
+    fn an_unknown_name_lists_what_answered() {
+        let e = NoReceiver {
+            to: Some("imc".into()),
+            timeout: Duration::from_secs(10),
+            others: vec![r("iMac", "B2")],
+        }
+        .to_string();
+        assert!(e.contains("on the network") && e.contains("iMac"), "{e}");
+    }
+
+    #[test]
     fn errors_carry_the_hints() {
         let e = NoReceiver {
             to: None,
             timeout: Duration::from_secs(10),
+            others: Vec::new(),
         }
         .to_string();
         assert!(
@@ -270,7 +351,7 @@ mod tests {
         );
         let e = SeveralReceivers(vec![r("iPhone", "A"), r("iMac", "B")]).to_string();
         assert!(
-            e.contains("pick one with --to") && e.contains("iMac"),
+            e.contains("od-sender connect <name>") && e.contains("iMac"),
             "{e}"
         );
     }

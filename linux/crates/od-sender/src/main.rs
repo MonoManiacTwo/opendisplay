@@ -146,6 +146,9 @@ enum Cmd {
         /// How long to browse, in seconds.
         #[arg(long, default_value_t = 3.0)]
         timeout: f64,
+        /// Print a JSON array of {name, addr, id, pv} (for scripts and agents).
+        #[arg(long)]
+        json: bool,
     },
     /// Explain what the sender would use here: backend, protocols, encoders.
     /// Exits non-zero on an unsupported desktop.
@@ -348,8 +351,12 @@ fn real_main() -> Result<i32> {
             rt.shutdown_timeout(Duration::from_millis(500));
             ran?;
         }
-        Cmd::List { timeout } => {
+        Cmd::List { timeout, json } => {
             let found = discover::list(Duration::from_secs_f64(timeout))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&found)?);
+                return Ok(if found.is_empty() { 1 } else { 0 });
+            }
             if found.is_empty() {
                 println!("no receivers found.\n{}", discover::NO_RECEIVER_HINT);
                 return Ok(1);

@@ -275,7 +275,7 @@ port 5353 ever misbehaves.
   `opendisplay-bin` pulling the CI-built `x86_64`/`aarch64` binaries, so
   `yay -S opendisplay-bin` is the Omarchy one-liner; ships a `.desktop` entry
   and a `systemd --user` unit for autostarting the receiver. (Superseded for
-  the sender by `opendisplay-sender`, a source AUR package from `linux-v*`
+  the sender by `opendisplay-sender`, a source AUR package from the app's `vX.Y.Z`
   tags: `linux/packaging/arch/opendisplay-sender`, SENDER-PLAN §3.5.)
 * **NixOS**: `flake.nix` with `packages` for both arches, a `devShell`, and
   `nixosModules.receiver-kiosk` = `services.cage.program = od-receiver` +

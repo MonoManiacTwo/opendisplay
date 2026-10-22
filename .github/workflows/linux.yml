@@ -11,11 +11,12 @@ on:
       - "linux/**"
       - "PROTOCOL.md"
       - ".github/workflows/linux.yml"
-  # Release tags too: linux-release.yml only unit-tests od-sender, so a
-  # linux-v* tag gets the full suite (clippy, all crates, the smokes) here.
+  # The release commit gets the full suite here too (linux-release.yml only
+  # unit-tests od-sender): release-please's release PR bumps linux/Cargo.toml,
+  # so merging it is a push to main under linux/**. The vX.Y.Z tag itself
+  # triggers nothing (tags created with GITHUB_TOKEN start no workflows).
   push:
     branches: [main]
-    tags: ["linux-v*"]
     paths:
       - "linux/**"
       - "PROTOCOL.md"

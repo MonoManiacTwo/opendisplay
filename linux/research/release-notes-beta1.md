@@ -1,19 +1,24 @@
-# Draft: release notes for `linux-v0.1.0-beta.1`
+# Linux beta in OpenDisplay vX.Y.Z
 
-Status: **draft, not tagged, not released.** Written 2026-10-20 against
-`linux-plan`. The `linux-release.yml` workflow writes its own notes (install
-lines for the AUR and the tarballs, the linked FFmpeg/x264 versions, the
-source checksum for the AUR) when the tag is pushed. The text below is meant
-to replace or precede them with `gh release edit linux-v0.1.0-beta.1
---notes-file …` once the release exists. Before publishing, re-check:
+Status: **draft, not released.** Written 2026-10-20 against `linux-plan`,
+reworked for the unified release stream (one version and one GitHub release
+for every platform, SENDER-PLAN §8.1): the Linux beta ships in the first app
+release cut after `linux-plan` merges, `vX.Y.Z` below. The `build-linux` job
+of `release.yml` (it calls `linux-release.yml`) appends a short "Linux
+(beta)" section to that release's notes: install lines for the tarballs,
+the Arch package and the Flatpak, the linked FFmpeg/x264 versions and the
+source checksum for the PKGBUILD. The text below is the long form; it
+replaces that section by hand once the release exists (`gh release view
+vX.Y.Z --json body --jq .body > notes.md`, edit, `gh release edit vX.Y.Z
+--notes-file notes.md`; keep the `<!-- linux-release:start/end -->` markers
+so a re-run of the job replaces it again). Before publishing, re-check:
 Android (first live session works, 2026-10-20; the functional checklist of
 touch, scroll, rotation, lock and quit is pending, so it is still "expected
-to work" below), the AUR package name being live, and the CI state of the
-smoke jobs.
+to work" below) and the CI state of the smoke jobs.
 
 ---
 
-## OpenDisplay Linux sender 0.1.0 beta 1
+## Linux (beta)
 
 `od-sender` extends a Linux desktop onto an OpenDisplay receiver: an iPhone,
 iPad, Android device or spare Mac running the OpenDisplay app. It creates a
@@ -38,14 +43,24 @@ experimental. Reports help a lot (see the end).
 
 ### Install
 
-* **Arch Linux / Omarchy:** `yay -S opendisplay-sender`
-* **Other distributions:** the `x86_64` and `aarch64` tarballs below; they
-  need glibc 2.38+ (x86_64) or 2.39+ (aarch64) and PipeWire
-  (`libpipewire-0.3`), not FFmpeg. Unpack and
-  run `./install.sh`: it installs `od-sender` into `~/.local/bin` with a
-  desktop entry and a `systemd --user` unit pointing at it
-  (`sudo ./install.sh --system` for `/usr/local`; `--uninstall` removes
-  them).
+* **Arch Linux / Omarchy:** build the package from this release's source
+  (it links the system FFmpeg):
+  ```sh
+  git clone --depth 1 --branch vX.Y.Z https://github.com/peetzweg/opendisplay.git
+  cd opendisplay/linux/packaging/arch/opendisplay-sender
+  ./from-checkout.sh -si    # makepkg -si on this checkout
+  ```
+* **Other distributions:** `od-sender-x86_64-unknown-linux-gnu.tar.gz` and
+  `od-sender-aarch64-unknown-linux-gnu.tar.gz` below; they need glibc 2.38+
+  (x86_64) or 2.39+ (aarch64) and PipeWire (`libpipewire-0.3`), not FFmpeg.
+  Unpack and run `./install.sh`: it installs `od-sender` into
+  `~/.local/bin` with a desktop entry and a `systemd --user` unit pointing
+  at it (`sudo ./install.sh --system` for `/usr/local`; `--uninstall`
+  removes them).
+* **Receiver:** `flatpak install --user od-receiver-x86_64.flatpak` (or
+  `-aarch64`) on any distribution incl. SteamOS; on Arch,
+  `linux/packaging/arch/opendisplay-receiver` builds the same way as the
+  sender.
 * **From source:** see [linux/README.md](https://github.com/peetzweg/opendisplay/blob/main/linux/README.md#from-source).
 
 Then open the OpenDisplay app on the receiver, on the same network, and run:

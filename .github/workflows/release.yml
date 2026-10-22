@@ -24,10 +24,11 @@ jobs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
+      # Manifest mode (release-please-config.json, .release-please-manifest.json)
+      # only to bump linux/Cargo.toml and linux/Cargo.lock with the app
+      # version: one `simple` package at the root, tags stay `vX.Y.Z`.
       - uses: googleapis/release-please-action@v5
         id: rp
-        with:
-          release-type: simple
 
   build-ios:
     needs: release-please
@@ -67,6 +68,19 @@ jobs:
         run: |
           export APP_MARKETING_VERSION="${TAG_NAME#v}"
           bundle exec fastlane ios beta
+
+  # Linux sender tarballs and receiver Flatpak bundles, attached to the same
+  # GitHub release; the job also appends the Linux install notes to it. One
+  # version for every platform: the tag above is the Linux version too.
+  build-linux:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    # The called workflow's upload job needs to write the release.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux-release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
 
   build-mac:
     needs: release-please

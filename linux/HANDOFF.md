@@ -122,6 +122,19 @@ Interim software win: x264 (`x264enc` via `gst-plugins-ugly`, or libx264) is
 - Conventional commit titles (`feat(linux):`, `fix(linux):`, …); the repo is
   squash-only and release-please reads the PR title — see the "Release note"
   in PR #298 before merging.
+- **Releases are unified** (SENDER-PLAN §8.1, `RELEASING.md`): Linux has no
+  tags of its own. Every app release `vX.Y.Z` (release-please) is also the
+  Linux release: the release PR bumps `linux/Cargo.toml` and `Cargo.lock`
+  to `X.Y.Z`, and `release.yml` calls `linux-release.yml`, which attaches
+  `od-sender-<arch>-unknown-linux-gnu.tar.gz` and
+  `od-receiver-<arch>.flatpak` to the same GitHub release and appends the
+  Linux notes. A `feat(linux)`/`fix(linux)` merge therefore cuts a Mac/iOS
+  release too; use `chore(linux)`/`ci(linux)` for changes that should not.
+  After a release: `linux/packaging/arch/opendisplay-{sender,receiver}/bump.sh
+  X.Y.Z` and commit. Do not push `linux-v*` tags (nothing builds them).
+  Before `linux-plan` merges, `.release-please-manifest.json` and
+  `linux/Cargo.toml` must name the latest released version (1.25.0 when
+  written; 1.26.0 if release PR #380 lands first).
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -D
   warnings` and `cargo test --workspace` must pass; CI runs them on both
   architectures.

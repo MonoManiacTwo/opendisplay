@@ -42,7 +42,8 @@ expectation to check on the Frame.
 ## 3. Install on the Frame (Flatpak)
 
 1. Desktop mode (or a terminal over SSH): download `od-receiver-aarch64.flatpak`
-   from the `linux-v*` GitHub release.
+   from the OpenDisplay GitHub release (`releases/latest`; Linux ships in
+   the app's `vX.Y.Z` releases, SENDER-PLAN §8.1).
 2. `flatpak install --user od-receiver-aarch64.flatpak` — per user, survives
    SteamOS updates, no root. The GNOME runtime comes from Flathub (enabled on
    SteamOS); H.264 software decode needs the runtime's

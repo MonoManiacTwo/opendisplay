@@ -74,11 +74,16 @@ impl BackendArgs {
 enum Cmd {
     /// Extend the desktop onto a receiver: dial it (or discover it), create a
     /// virtual display sized from its `hello`, capture, encode and stream.
+    /// Ctrl+C disconnects.
+    #[command(visible_alias = "connect")]
     Run {
         /// Receiver: `host:port`, or a name/id to discover. Omitted: the only
         /// receiver on the network (several: pick one with --to).
         #[arg(long, value_name = "NAME|ID|ADDR")]
         to: Option<String>,
+        /// Same as --to: `od-sender connect iMac`.
+        #[arg(value_name = "RECEIVER", conflicts_with = "to")]
+        receiver: Option<String>,
         /// Keep looking until the receiver appears instead of giving up after
         /// 10 s (for the systemd unit and login autostart).
         #[arg(long)]
@@ -265,6 +270,7 @@ fn real_main() -> Result<i32> {
     match args.cmd {
         Cmd::Run {
             to,
+            receiver,
             wait,
             connect,
             name,
@@ -282,6 +288,7 @@ fn real_main() -> Result<i32> {
             duration,
             backend,
         } => {
+            let to = to.or(receiver);
             let config = load_config(args.config.as_deref())?;
             let cli = config::Layer {
                 position,

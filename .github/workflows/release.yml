@@ -3,6 +3,14 @@ name: Release
 on:
   push:
     branches: [main]
+  # Recovery: build and upload every platform for a release that already
+  # exists (release-please created the tag, but a later step failed before
+  # the build jobs ran).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build, e.g. v1.26.0
+        required: true
 
 permissions:
   contents: write
@@ -21,14 +29,23 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name: ${{ steps.rp.outputs.tag_name }}
+      release_created: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.rp.outputs.release_created }}
+      tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || steps.rp.outputs.tag_name }}
     steps:
       # Manifest mode (release-please-config.json, .release-please-manifest.json)
       # only to bump linux/Cargo.toml and linux/Cargo.lock with the app
       # version: one `simple` package at the root, tags stay `vX.Y.Z`.
       - uses: googleapis/release-please-action@v5
+        if: github.event_name == 'push'
         id: rp
+      - name: Check the release to rebuild exists
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a vX.Y.Z tag: $TAG"; exit 1; }
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
 
   build-ios:
     needs: release-please
@@ -36,6 +53,8 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -93,6 +112,8 @@ jobs:
       SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: ruby/setup-ruby@v1
         with:

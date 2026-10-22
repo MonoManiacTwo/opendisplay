@@ -1,22 +1,24 @@
 name: Linux release
 
-# Linux sender releases are cut by hand, by pushing a `linux-v*` tag:
-#   git tag linux-v0.1.0-beta.1 && git push origin linux-v0.1.0-beta.1
-# They stay out of release-please (release.yml runs on pushes to main and owns
-# the plain `v*` tags; it ignores `linux-`-prefixed tags as another
-# component's), so a Linux release never triggers a Mac/iOS build and an app
-# release never ships Linux binaries. See linux/SENDER-PLAN.md §8.1.
-#
-# The release is never marked "Latest": the website's Mac download buttons
-# resolve releases/latest/download/OpenDisplay.dmg.
+# Linux ships in lockstep with the Mac and iOS apps: one version, one
+# release. release.yml calls this workflow with the `vX.Y.Z` tag that
+# release-please just created; the jobs below build the Linux artifacts from
+# that tag and attach them to the same GitHub release, next to
+# OpenDisplay.dmg and OpenDisplayReceiver.dmg, and append the Linux install
+# notes to its body. See linux/SENDER-PLAN.md §8.1 and RELEASING.md.
 #
 # The binaries link a minimal static FFmpeg and x264 built by
 # linux/packaging/ffmpeg/build-static.sh, so they run on any glibc distro
 # whatever its FFmpeg (SENDER-PLAN §3.5 option C). Pull requests touching that
-# script or this file, and manual runs, build and smoke-test without releasing.
+# script or this file, and manual runs, build and smoke-test without
+# releasing: only a workflow_call with a `tag` uploads anything.
 on:
-  push:
-    tags: ["linux-v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag (vX.Y.Z) whose existing GitHub release receives the Linux assets
+        required: true
+        type: string
   # Anything that can break the static link or the tarball: the FFmpeg
   # build, the packaging scripts, the lockfile and the crates od-sender links.
   pull_request:
@@ -31,11 +33,13 @@ on:
       - "linux/crates/opendisplay-proto/**"
       - "linux/crates/opendisplay-session/**"
       - "linux/crates/od-receiver/**"
+      - "linux/crates/build-version.rs"
       - ".github/workflows/linux-release.yml"
+  # No inputs: a manual run is a smoke test and never touches a release.
   workflow_dispatch:
 
 concurrency:
-  group: linux-release-${{ github.ref }}
+  group: linux-release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -66,12 +70,17 @@ jobs:
       run:
         working-directory: linux
     env:
-      TAG: ${{ github.ref_name }}
+      # Empty on pull requests and manual runs.
+      TAG: ${{ inputs.tag }}
       # Fixed path: build-static.sh bakes it into rustflags, and the cache
       # restores it here.
       FFMPEG_DIR: /home/runner/static-ffmpeg
     steps:
+      # The release tag itself when called from release.yml (the commit
+      # release-please tagged), else the event's commit.
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
 
       # No FFmpeg or x264 packages: the static build brings its own, and their
       # absence keeps the system ones out of the link. libclang for bindgen,
@@ -84,19 +93,25 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # linux-v0.1.0-beta.1 must belong to crate version 0.1.0, and
+      # Tag v1.26.0 must carry workspace version 1.26.0 (release-please bumps
+      # linux/Cargo.toml and linux/Cargo.lock in the release PR), and
       # `od-sender --version` names the release it came from.
       - name: Version
         run: |
           crate="$(cargo pkgid -p od-sender | sed 's/.*[#@]//')"
-          if [ "$GITHUB_REF_TYPE" != tag ]; then
-            echo "VERSION=${crate}-dev.${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-            echo "OD_SENDER_VERSION=${crate}-dev.${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          if [ -z "$TAG" ]; then
+            sha="$(git rev-parse --short=7 HEAD)"
+            echo "VERSION=${crate}-dev.${sha}" >> "$GITHUB_ENV"
+            echo "OD_SENDER_VERSION=${crate}-dev.${sha}" >> "$GITHUB_ENV"
             exit 0
           fi
-          ver="${TAG#linux-v}"
-          if [ "${ver%%-*}" != "$crate" ]; then
-            echo "::error::tag $TAG does not match od-sender version $crate"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag $TAG is not vX.Y.Z"
+            exit 1
+          fi
+          ver="${TAG#v}"
+          if [ "$ver" != "$crate" ]; then
+            echo "::error::tag $TAG does not match workspace version $crate (linux/Cargo.toml)"
             exit 1
           fi
           echo "VERSION=$ver" >> "$GITHUB_ENV"
@@ -151,9 +166,13 @@ jobs:
             "$bin" dev encode-bench --encoder "$enc" --width 640 --height 480 --frames 30
           done
 
+      # No version in the name: the release also holds the Mac DMGs, and a
+      # fixed name lets the website link
+      # releases/latest/download/od-sender-<arch>-unknown-linux-gnu.tar.gz
+      # the way it links OpenDisplay.dmg. `od-sender --version` has it.
       - name: Package
         run: |
-          name="od-sender-${VERSION}-${{ matrix.arch }}-unknown-linux-gnu"
+          name="od-sender-${{ matrix.arch }}-unknown-linux-gnu"
           stage="$RUNNER_TEMP/$name"
           mkdir -p "$stage" "$RUNNER_TEMP/dist"
           install -m755 target/release/od-sender packaging/tarball/install.sh "$stage/"
@@ -197,6 +216,8 @@ jobs:
     steps:
       # Pinned by SHA: its bundles are release attachments.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.tag }}
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6
         with:
           bundle: od-receiver-${{ matrix.arch }}.flatpak
@@ -204,21 +225,27 @@ jobs:
           arch: ${{ matrix.arch }}
           cache-key: flatpak-builder-${{ matrix.arch }}-${{ hashFiles('linux/Cargo.lock') }}
 
+  # Attaches the Linux artifacts to the release release-please created for
+  # the tag (the Mac job attaches its DMGs to the same release in parallel)
+  # and appends the Linux section to its notes. Only when called with a tag:
+  # pull requests and manual runs stop after the builds.
   release:
     needs: [build, flatpak]
-    if: github.ref_type == 'tag'
+    if: ${{ inputs.tag }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The one job that can write to the repository: actions pinned by SHA.
+    # release.yml must grant the calling job contents: write.
     permissions:
       contents: write
     env:
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ inputs.tag }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ inputs.tag }}
           sparse-checkout: linux/packaging/ffmpeg
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -232,44 +259,90 @@ jobs:
         working-directory: dist
         run: for f in ./*.flatpak; do sha256sum "${f#./}" > "${f}.sha256"; done
 
-      - name: Verify checksums
+      # Every expected file, each with a matching checksum. The names
+      # never collide with the Mac assets (OpenDisplay.dmg,
+      # OpenDisplayReceiver.dmg): --clobber below must only ever replace
+      # Linux files from an earlier attempt of this job.
+      - name: Verify assets
         working-directory: dist
         run: |
           ls -l
-          ls ./*.tar.gz ./*.flatpak >/dev/null
+          want=""
+          for arch in x86_64 aarch64; do
+            want+="od-sender-${arch}-unknown-linux-gnu.tar.gz od-sender-${arch}-unknown-linux-gnu.tar.gz.sha256 "
+            want+="od-receiver-${arch}.flatpak od-receiver-${arch}.flatpak.sha256 "
+          done
+          for f in $want; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          # Only the names above are uploaded; anything else is reported.
+          for f in *; do
+            case " $want" in *" $f "*) ;; *) echo "::warning::not uploaded: $f" ;; esac
+          done
           sha256sum -c ./*.sha256
+          echo "ASSETS=$want" >> "$GITHUB_ENV"
 
-      # The AUR package builds from GitHub's tag tarball; its checksum goes
-      # into the notes so bump.sh's result can be cross-checked.
-      - name: Write release notes
+      # release-please creates the release before release.yml calls this
+      # workflow; refuse to create one here.
+      - name: Upload to the release
+        run: |
+          gh release view "$TAG" --json tagName,isDraft,isPrerelease
+          # shellcheck disable=SC2086 # ASSETS is a space-separated list of names
+          (cd dist && gh release upload "$TAG" $ASSETS --clobber)
+          have="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for f in $ASSETS; do
+            grep -Fxq "$f" <<<"$have" || { echo "::error::$f is not on release $TAG"; exit 1; }
+          done
+          echo "$have"
+
+      # The Linux section after release-please's changelog, between markers
+      # so a re-run replaces it instead of appending a second copy. The
+      # PKGBUILDs build from GitHub's tag tarball; its checksum goes into the
+      # notes so bump.sh's result can be cross-checked.
+      - name: Append Linux notes
         run: |
           set -o pipefail  # a failed download must not hash to e3b0c442…
-          ver="${TAG#linux-v}"
+          ver="${TAG#v}"
           script=linux/packaging/ffmpeg/build-static.sh
           ffmpeg_tag="$(sed -n 's/^FFMPEG_TAG=//p' "$script")"
           x264_commit="$(sed -n 's/^X264_COMMIT=\([0-9a-f]*\).*/\1/p' "$script")"
           src_sha="$(curl -fsSL "https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz" | sha256sum | cut -d' ' -f1)"
-          cat > notes.md <<EOF
-          Linux sender (\`od-sender\`) ${ver}, beta. Wayland only; tested on Omarchy / Hyprland 0.55+.
+          readme="https://github.com/${GH_REPO}/blob/${TAG}/linux/README.md"
+          cat > linux.md <<EOF
+          <!-- linux-release:start -->
+          ## Linux (beta)
 
-          **Arch Linux / Omarchy:** \`yay -S opendisplay-sender\` (AUR; builds against your system FFmpeg and gets updates through your AUR helper).
+          The Linux sender (\`od-sender\`, Wayland) and receiver (\`od-receiver\`), version ${ver} like the Mac and iOS apps. Beta: tested on Omarchy / Hyprland 0.55+; Sway 1.10+, KDE Plasma 6.8+ and GNOME 50+ are experimental. Setup, configuration and known issues: [linux/README.md](${readme}).
 
-          **Any other distribution:** the tarballs below run on x86_64 Linux with glibc 2.38 or newer (Ubuntu 24.04, Debian 13, Fedora 39 and later) and on aarch64 Linux with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). FFmpeg ${ffmpeg_tag} and x264 are linked in statically with only the H.264 encoders the sender uses, so no FFmpeg install is needed; PipeWire (\`libpipewire-0.3\`, present on any current desktop) must be installed. Unpack and run \`./install.sh\` (into \`~/.local\`; \`sudo ./install.sh --system\` for \`/usr/local\`): it installs \`od-sender\`, a desktop entry and a \`systemd --user\` template unit pointing at it. Then run \`od-sender run\`. Each tarball also has the license (GPL-3.0; this build includes GPL x264), \`THIRD-PARTY-LICENSES.txt\` (FFmpeg, x264, OpenH264 and the Rust crates linked in) and \`PROTOCOL.md\`.
+          **Sender, any distribution:** \`od-sender-x86_64-unknown-linux-gnu.tar.gz\` runs on x86_64 Linux with glibc 2.38 or newer (Ubuntu 24.04, Debian 13, Fedora 39 and later); \`od-sender-aarch64-unknown-linux-gnu.tar.gz\` on aarch64 Linux with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). FFmpeg ${ffmpeg_tag} and x264 are linked in statically with only the H.264 encoders the sender uses, so no FFmpeg install is needed; PipeWire (\`libpipewire-0.3\`, present on any current desktop) must be installed.
 
-          **Receiver (\`od-receiver\`), any distribution incl. SteamOS:** \`flatpak install --user od-receiver-<arch>.flatpak\`, then start "OpenDisplay Receiver". It fills the screen when a sender connects.
+          \`\`\`sh
+          tar xzf od-sender-x86_64-unknown-linux-gnu.tar.gz
+          cd od-sender-x86_64-unknown-linux-gnu
+          ./install.sh        # into ~/.local; sudo ./install.sh --system for /usr/local
+          od-sender run
+          \`\`\`
 
-          Linked-in sources: FFmpeg [${ffmpeg_tag}](https://github.com/FFmpeg/FFmpeg/tree/${ffmpeg_tag}) and x264 [${x264_commit:0:7}](https://code.videolan.org/videolan/x264/-/tree/${x264_commit}), configured by [\`build-static.sh\`](https://github.com/${GH_REPO}/blob/${TAG}/${script}).
+          \`install.sh\` installs \`od-sender\`, a desktop entry and a \`systemd --user\` template unit pointing at it. Each tarball also has the license (GPL-3.0; this build includes GPL x264), \`THIRD-PARTY-LICENSES.txt\` (FFmpeg, x264, OpenH264 and the Rust crates linked in) and \`PROTOCOL.md\`.
 
-          Source tarball sha256 (AUR): \`${src_sha}\`
+          **Arch Linux / Omarchy:** build the package from this release's source; it links the system FFmpeg:
+
+          \`\`\`sh
+          git clone --depth 1 --branch ${TAG} https://github.com/${GH_REPO}.git
+          cd opendisplay/linux/packaging/arch/opendisplay-sender
+          ./from-checkout.sh -si   # makepkg -si on this checkout
+          \`\`\`
+
+          \`linux/packaging/arch/opendisplay-receiver\` next to it builds the receiver the same way.
+
+          **Receiver, any distribution incl. SteamOS:** \`flatpak install --user od-receiver-x86_64.flatpak\` (or \`od-receiver-aarch64.flatpak\`), then start "OpenDisplay Receiver". It fills the screen when a sender connects.
+
+          Linked-in sources: FFmpeg [${ffmpeg_tag}](https://github.com/FFmpeg/FFmpeg/tree/${ffmpeg_tag}) and x264 [${x264_commit:0:7}](https://code.videolan.org/videolan/x264/-/tree/${x264_commit}), configured by [\`build-static.sh\`](https://github.com/${GH_REPO}/blob/${TAG}/${script}). Source tarball sha256 (PKGBUILD): \`${src_sha}\`
+          <!-- linux-release:end -->
           EOF
+          gh release view "$TAG" --json body --jq .body > body.md
+          # Drop a section from an earlier attempt, then append this one.
+          sed -i '/^<!-- linux-release:start -->$/,/^<!-- linux-release:end -->$/d' body.md
+          { cat body.md; echo; cat linux.md; } > notes.md
           cat notes.md
-
-      # Always a pre-release while the sender is in beta; never "Latest".
-      - name: Create pre-release
-        run: |
-          gh release create "$TAG" dist/*.tar.gz dist/*.sha256 dist/*.flatpak \
-            --verify-tag \
-            --prerelease \
-            --latest=false \
-            --title "Linux sender ${TAG#linux-v}" \
-            --notes-file notes.md
+          gh release edit "$TAG" --notes-file notes.md

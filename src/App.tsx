@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import Showcase from "./components/Showcase"
+import SiteFooter from "./components/SiteFooter"
 import SupportNudge from "./components/SupportNudge"
 import TextRotate from "./components/TextRotate"
 
@@ -10,17 +11,14 @@ const APP_STORE_URL = "https://apps.apple.com/us/app/opendisplay/id6780264891"
 const ANDROID_BETA_GROUP_URL = "https://groups.google.com/g/opendisplay"
 const ANDROID_BETA_TESTER_URL = "https://play.google.com/apps/testing/com.peetzweg.opendisplay"
 // The Linux sender (od-sender) and receiver (od-receiver) are betas, shipped
-// in the linux-v* pre-releases: sender tarballs with an installer, receiver
+// with the shared vX.Y.Z release: sender tarballs with an installer, receiver
 // Flatpak bundles, and in-repo PKGBUILDs for Arch (the AUR package follows
-// once AUR registration reopens). Docs: linux/README.md.
-const LINUX_README_URL = "https://github.com/peetzweg/opendisplay/blob/main/linux/README.md"
-const LINUX_ARCH_URL = `${LINUX_README_URL}#arch--omarchy-build-the-package`
-const LINUX_RECEIVER_URL = `${LINUX_README_URL}#linux-receiver-beta`
-// Linux releases are GitHub pre-releases, which releases/latest never shows.
-// linux-v0.1.0-beta.1 was not tagged yet when this was written, so this
-// lists the linux-v* releases; once the tag exists, point it at
-// https://github.com/peetzweg/opendisplay/releases/tag/linux-v0.1.0-beta.1
-const LINUX_RELEASES_URL = "https://github.com/peetzweg/opendisplay/releases?q=linux-v&expanded=true"
+// once AUR registration reopens). Docs: /docs/linux/ (content/docs/linux/,
+// prerendered by tools/docs.mjs); linux/README.md mirrors them for GitHub.
+const LINUX_DOCS_URL = "docs/linux/"
+const LINUX_ARCH_URL = "docs/linux/install/#arch-omarchy-build-the-package"
+const LINUX_RECEIVER_URL = "docs/linux/receiver/"
+const LINUX_RELEASES_URL = "https://github.com/peetzweg/opendisplay/releases/latest"
 
 const HERO_WORDS = [
   "partner's iPad",
@@ -152,6 +150,7 @@ export default function App() {
             <a href="#features">Features</a>
             <a href="#why">Compare</a>
             <a href="#faq">FAQ</a>
+            <a href="docs/">Docs</a>
             <a href="#compatible">Other platforms</a>
             <a href="#contribute">Contribute</a>
             <a
@@ -249,15 +248,15 @@ export default function App() {
                   The OpenDisplay Linux sender adds a virtual display to your desktop and shows it on
                   your iPhone, iPad, Mac or Android device.
                 </p>
-                <a className="btn primary" href={LINUX_RELEASES_URL}>
-                  Download the beta
+                <a className="btn primary" href={LINUX_DOCS_URL}>
+                  Get started
                 </a>
                 <p className="note brew">
                   Prebuilt x86_64 and aarch64 tarballs with an installer, for any distribution. On
                   Arch / Omarchy you can build the package from the repository with makepkg.
                 </p>
                 <p className="note">
-                  <a href={LINUX_ARCH_URL}>Arch / Omarchy: build the package ↗</a>
+                  <a href={LINUX_ARCH_URL}>Arch / Omarchy: build the package</a>
                 </p>
                 <p className="note">
                   Tested on Omarchy / Hyprland&nbsp;0.56 on Apple silicon (Asahi); x86_64 expected
@@ -269,8 +268,8 @@ export default function App() {
                   network you trust. An AUR package follows once AUR registration reopens.
                 </p>
                 <p className="note">
-                  <a href={LINUX_README_URL}>Setup &amp; known issues ↗</a> ·{" "}
-                  <a href={LINUX_RELEASES_URL}>Pre-releases ↗</a>
+                  <a href={LINUX_DOCS_URL}>Setup &amp; known issues</a> ·{" "}
+                  <a href={LINUX_RELEASES_URL}>Download from the latest release ↗</a>
                 </p>
               </div>
             </div>
@@ -361,7 +360,7 @@ export default function App() {
                   <p className="note">
                     Tested windowed on Asahi Linux / Hyprland at 24&nbsp;ms end to end; other
                     desktops expected to work. Install the Flatpak bundle from the{" "}
-                    <a href={LINUX_RELEASES_URL}>beta release ↗</a> (any distribution), or build
+                    <a href={LINUX_RELEASES_URL}>latest release ↗</a> (any distribution), or build
                     the package on Arch / Omarchy.
                   </p>
                 </div>
@@ -577,13 +576,13 @@ export default function App() {
               with touch coming back as pointer input. It is tested on Omarchy / Hyprland 0.56 on
               Apple silicon (Asahi), and x86_64 is expected to work; Sway 1.10+, KDE Plasma 6.8+
               and GNOME 50+ are experimental. It encodes on the CPU for now (VA-API is planned).
-              Install it from the linux-v0.1.0-beta.1 pre-release: a tarball with an installer for
-              any distribution, or on Arch / Omarchy the package built from the repository with
+              Install it from the latest release: a tarball with an installer for any
+              distribution, or on Arch / Omarchy the package built from the repository with
               makepkg. The stream is not encrypted, so use a network you trust. See the{" "}
-              <a href={LINUX_README_URL}>Linux README</a> for setup and known issues.</p>
+              <a href={LINUX_DOCS_URL}>Linux docs</a> for setup and known issues.</p>
               <p>A Linux <em>receiver</em>, which turns a Linux machine into the display, is in
               beta too: a Flatpak bundle for any distribution, or the Arch package built with
-              makepkg. See the <a href={LINUX_RECEIVER_URL}>Linux receiver section</a>.</p>
+              makepkg. See the <a href={LINUX_RECEIVER_URL}>Linux receiver docs</a>.</p>
             </details>
             <details>
               <summary>Can another Mac be the display?</summary>
@@ -706,19 +705,7 @@ export default function App() {
         </div>
       </section>
 
-      <footer>
-        <div className="wrap">
-          <div className="links">
-            <a href="https://github.com/peetzweg/opendisplay">GitHub</a>
-            <a href="https://github.com/peetzweg/opendisplay/releases/latest">Releases</a>
-            <a href="https://github.com/peetzweg/opendisplay/issues">Issues</a>
-            <a href="https://ko-fi.com/peetzweg">Support / Ko-fi</a>
-            <a href="privacy.html">Privacy</a>
-            <a href="https://github.com/peetzweg/opendisplay/blob/main/LICENSE">GPL-3.0 License</a>
-          </div>
-          <p className="fine">OpenDisplay — use your iPhone or iPad as a second monitor for your Mac. Free forever.</p>
-        </div>
-      </footer>
+      <SiteFooter />
     </>
   )
 }

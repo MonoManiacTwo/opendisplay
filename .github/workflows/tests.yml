@@ -83,6 +83,10 @@ jobs:
       # Lint is what catches a platform API above minSdk 21 sneaking in
       # without an SDK_INT guard. assembleRelease (unsigned) runs the release
       # variant's lintVital and resource checks, which otherwise first run in
-      # the release workflow after the tag already exists.
+      # the release workflow after the tag already exists. The bundle is the
+      # Google Play build, which needs minSdk 24.
       - name: Unit tests, lint, debug and release builds
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
+
+      - name: Google Play bundle (minSdk 24)
+        run: ./gradlew --no-daemon bundleRelease -PappMinSdk=24

@@ -12,10 +12,81 @@ let macAppURL = URL(string: "https://opendisplay.app/")!
 
 @main
 struct OpenSidecarPhoneApp: App {
+    @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
+
     var body: some Scene {
         WindowGroup {
             ReceiverScreen()
         }
+    }
+}
+
+// MARK: - Orientation lock
+
+/// Which way the second monitor faces. Rotating the device already rebuilds
+/// the Mac's virtual display; this pins it so it stays put while the device
+/// is propped up or lying flat.
+enum OrientationLock: String, CaseIterable, Identifiable {
+    case auto, portrait, landscape
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Auto"
+        case .portrait: return "Vertical"
+        case .landscape: return "Landscape"
+        }
+    }
+
+    var mask: UIInterfaceOrientationMask {
+        switch self {
+        case .auto: return .all
+        case .portrait: return [.portrait, .portraitUpsideDown]
+        case .landscape: return .landscape
+        }
+    }
+
+    /// Where to turn on iOS 15, which has no geometry request.
+    fileprivate var legacyTarget: UIInterfaceOrientation? {
+        switch self {
+        case .auto: return nil
+        case .portrait: return .portrait
+        case .landscape: return .landscapeRight
+        }
+    }
+
+    static let storageKey = "orientationLock"
+
+    static var current: OrientationLock {
+        UserDefaults.standard.string(forKey: storageKey).flatMap(Self.init) ?? .auto
+    }
+
+    /// Rotates now if the current orientation is no longer allowed. The
+    /// resulting size change reaches `ReceiverModel.updatePanel`, so the Mac
+    /// rebuilds exactly as it does for a hand rotation.
+    @MainActor
+    func apply() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if #available(iOS 16.0, *) {
+            for scene in scenes {
+                scene.windows.first?.rootViewController?
+                    .setNeedsUpdateOfSupportedInterfaceOrientations()
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                    Log.info("orientation lock \(rawValue) refused: \(error.localizedDescription)")
+                }
+            }
+        } else if let target = legacyTarget {
+            UIDevice.current.setValue(target.rawValue, forKey: "orientation")
+            UIViewController.attemptRotationToDeviceOrientation()
+        }
+    }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        OrientationLock.current.mask
     }
 }
 
@@ -124,6 +195,7 @@ struct ReceiverScreen: View {
             if let update = recommendedUpdate { Text(update.message) }
         }
         .task { await versionGate.check() }
+        .onAppear { OrientationLock.current.apply() }
         // Merge the connected Mac's compatibility signal into the same gate.
         .onReceive(model.receiver.$peerSignal) { versionGate.applyPeer($0) }
         .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
@@ -342,6 +414,7 @@ struct SettingsView: View {
     // Set once the user tapped "Rate on the App Store": the row is an
     // invitation, not a permanent fixture.
     @AppStorage("rateAppTapped") private var rateAppTapped = false
+    @AppStorage(OrientationLock.storageKey) private var orientationLock = OrientationLock.auto
     @Environment(\.openURL) private var openURL
 
     private var version: String {
@@ -373,6 +446,18 @@ struct SettingsView: View {
                         LabeledRow("Stream",
                                    value: "\(Int(receiver.videoSize.width))×\(Int(receiver.videoSize.height)) @ \(receiver.fps) fps")
                     }
+                }
+
+                Section {
+                    Picker("Orientation", selection: $orientationLock) {
+                        ForEach(OrientationLock.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: orientationLock) { $0.apply() }
+                } header: {
+                    Text("Orientation")
+                } footer: {
+                    Text("Auto follows the \(deviceKind) as you turn it. Vertical or Landscape keeps your computer's second monitor that way whichever way the \(deviceKind) is held.")
                 }
 
                 Section {
@@ -426,7 +511,7 @@ struct SettingsView: View {
                           systemImage: "cable.connector")
                     Label("WiFi: both devices on the same network, then pick this \(deviceKind) in OpenDisplay on your computer.",
                           systemImage: "wifi")
-                    Label("Rotate the \(deviceKind) for a vertical second monitor.",
+                    Label("Rotate the \(deviceKind) for a vertical second monitor, or pin it under Orientation above.",
                           systemImage: "rotate.right")
                     Label("Touch: tap to click, drag to drag, two-finger pan to scroll.",
                           systemImage: "hand.tap")

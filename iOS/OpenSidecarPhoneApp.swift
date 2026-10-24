@@ -91,9 +91,11 @@ struct ReceiverScreen: View {
                     IdleView(receiver: model.receiver, showSettings: $showSettings)
                 }
             }
-            .onAppear { model.receiver.setOrientation(portrait: geo.size.height > geo.size.width) }
+            .onAppear { model.updatePanel(portrait: geo.size.height > geo.size.width) }
             .onChange(of: geo.size) { size in
-                model.receiver.setOrientation(portrait: size.height > size.width)
+                // Rotation, and on iPhone Duo folding or unfolding, which
+                // moves the app between two differently sized displays.
+                model.updatePanel(portrait: size.height > size.width)
             }
             .sheet(isPresented: $showOnboarding) {
                 OnboardingView { onboardingDismissed = true }
@@ -549,27 +551,18 @@ final class ReceiverModel: ObservableObject {
         // buys quality per bit, which matters most over WiFi. Bounded by the
         // panel in either orientation, so a large mirrored Mac display is
         // scaled to what this screen can show instead of sent in full.
-        let native = UIScreen.main.nativeBounds.size   // portrait pixels
-        let longSide = Int(max(native.width, native.height))
-        var decodesHEVC = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
-        #if DEBUG
-        // The simulator has no hardware decoder; -forceHEVCOffer YES exercises
-        // the HEVC receive path there with software decode.
-        if UserDefaults.standard.bool(forKey: "forceHEVCOffer") { decodesHEVC = true }
-        #endif
-        let hevc = decodesHEVC
-            ? VideoCapability(codec: "hevc", maxWidth: longSide, maxHeight: longSide,
-                              maxFrameRate: 60)
-            : nil
+        let screen = Self.currentScreen
+        let native = screen.nativeBounds.size   // portrait pixels
         receiver = StreamReceiver(displayLayer: AVSampleBufferDisplayLayer(),
                                   deviceKind: deviceKind,
                                   fallbackServiceName: UIDevice.current.name,
-                                  hevcCapability: hevc)
+                                  hevcCapability: Self.hevcCapability(
+                                      longSide: Int(max(native.width, native.height))))
         // Announce the native panel size to the Mac.
         receiver.setNativePanel(long: Int(max(native.width, native.height)),
                                 short: Int(min(native.width, native.height)),
-                                scale: Double(UIScreen.main.nativeScale))
-        receiver.setDisplayMaxFrameRate(UIScreen.main.maximumFramesPerSecond)
+                                scale: Double(screen.nativeScale))
+        receiver.setDisplayMaxFrameRate(screen.maximumFramesPerSecond)
         if let budget = DecodeBudget.maxPixelsPerSecond(model: DecodeBudget.currentModel) {
             receiver.setDecodeBudget(maxPixelsPerSecond: budget)
         }
@@ -579,6 +572,50 @@ final class ReceiverModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+    }
+
+    /// The screen the app is showing on. iPhone Duo has two panels, a 5.4"
+    /// outer and a 7.6" inner one, and the app moves between them as the
+    /// device folds, so `UIScreen.main` at launch is not a fixed fact there.
+    private static var currentScreen: UIScreen {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.session.role == .windowApplication }
+            .first { $0.activationState == .foregroundActive }?
+            .screen ?? UIScreen.main
+    }
+
+    /// Bounded by the panel in either orientation, so a large mirrored Mac
+    /// display is scaled to what this screen can show instead of sent in full.
+    private static func hevcCapability(longSide: Int) -> VideoCapability? {
+        var decodesHEVC = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+        #if DEBUG
+        // The simulator has no hardware decoder; -forceHEVCOffer YES exercises
+        // the HEVC receive path there with software decode.
+        if UserDefaults.standard.bool(forKey: "forceHEVCOffer") { decodesHEVC = true }
+        #endif
+        return decodesHEVC
+            ? VideoCapability(codec: "hevc", maxWidth: longSide, maxHeight: longSide,
+                              maxFrameRate: 60)
+            : nil
+    }
+
+    /// Re-reads the current screen and announces it in this orientation. A
+    /// fold or unfold changes the panel, the HEVC bound and possibly the
+    /// refresh rate together; the receiver re-sends hello only if something
+    /// changed, and the Mac rebuilds the virtual display as it does on
+    /// rotation.
+    func updatePanel(portrait: Bool) {
+        let screen = Self.currentScreen
+        let native = screen.nativeBounds.size
+        let long = Int(max(native.width, native.height))
+        let short = Int(min(native.width, native.height))
+        receiver.setNativePanel(long: long, short: short, scale: Double(screen.nativeScale))
+        let limitsChanged = receiver.setDecodeLimits(
+            maxEncodeWide: nil, maxEncodeHigh: nil,
+            hevc: Self.hevcCapability(longSide: long))
+        receiver.setDisplayMaxFrameRate(screen.maximumFramesPerSecond)
+        receiver.setOrientation(portrait: portrait, limitsChanged: limitsChanged)
     }
 
     func start() {

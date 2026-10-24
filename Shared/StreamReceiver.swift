@@ -219,8 +219,11 @@ final class StreamReceiver: ObservableObject {
     /// message so it can size the virtual display. Orientation-dependent:
     /// rotating the phone re-announces with swapped dimensions and the Mac
     /// rebuilds the virtual display as a portrait/landscape monitor.
+    /// Re-read on every geometry change, not only at launch: a foldable
+    /// (iPhone Duo) swaps between its outer and inner display mid-session.
     private var nativeLong = 0
     private var nativeShort = 0
+    private var nativeScale: Double = 2
     private(set) var devicePixelsWide = 0
     private(set) var devicePixelsHigh = 0
     var deviceScale: Double = 2
@@ -293,21 +296,25 @@ final class StreamReceiver: ObservableObject {
         }
     }
 
+    /// Records the native panel without announcing it; `setOrientation`
+    /// announces. Called again whenever the screen itself may have changed
+    /// (fold/unfold), so it must not touch the announced fields after launch.
     func setNativePanel(long: Int, short: Int, scale: Double) {
         nativeLong = long
         nativeShort = short
-        deviceScale = scale
+        nativeScale = scale
         if devicePixelsWide == 0 {   // default landscape until the view reports
             devicePixelsWide = long
             devicePixelsHigh = short
+            deviceScale = scale
         }
     }
 
-    func setOrientation(portrait: Bool) {
+    func setOrientation(portrait: Bool, limitsChanged: Bool = false) {
         guard nativeLong > 0 else { return }
         setPanel(pixelsWide: portrait ? nativeShort : nativeLong,
                  pixelsHigh: portrait ? nativeLong : nativeShort,
-                 scale: deviceScale)
+                 scale: nativeScale, limitsChanged: limitsChanged)
     }
 
     /// Announce the panel this receiver renders onto. Called before start()
